@@ -1,0 +1,97 @@
+{
+  "nodes": {
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1771369470,
+        "narHash": "sha256-0NBlEBKkN3lufyvFegY4TYv5mCNHbi5OmBDrzihbBMQ=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "0182a361324364ae3f436a63005877674cf45efb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "odin-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1770209126,
+        "narHash": "sha256-TiXHFFmXzSyENFeTtQoskGrU7oWAHXR7eGgne0w1vEE=",
+        "owner": "odin-lang",
+        "repo": "Odin",
+        "rev": "b942f72cb085f79b214a596c0628984298358eaa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "odin-lang",
+        "ref": "dev-2026-02",
+        "repo": "Odin",
+        "type": "github"
+      }
+    },
+    "ols-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1770855694,
+        "narHash": "sha256-3UoVMQuUol7vfSM57mj644XZ1CKmTz7+VuDSETT9NSE=",
+        "owner": "DanielGavin",
+        "repo": "ols",
+        "rev": "92b8c767d233c6556ebf46072f32a02d06277363",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DanielGavin",
+        "ref": "dev-2026-02",
+        "repo": "ols",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": "nixpkgs",
+        "odin-src": "odin-src",
+        "ols-src": "ols-src"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

@@ -1,0 +1,8 @@
+.DS_Store
+
+/.direnv
+/dist-newstyle
+/result
+/test/parser/golden-stdlib/
+/test/parser/golden-ols/
+/test/parser/testgen/testgen

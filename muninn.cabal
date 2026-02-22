@@ -1,0 +1,61 @@
+cabal-version:      3.0
+name:               muninn
+version:            0.1.0.0
+homepage:           https://github.com/cephei8/muninn
+license:            MIT
+license-file:       LICENSE
+author:             cephei8
+maintainer:         i@cephei8.dev
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall
+
+common extensions
+    default-extensions: OverloadedStrings
+
+library
+    import:           warnings, extensions
+    hs-source-dirs:   src
+    exposed-modules:  Muninn.Parser
+                    , Muninn.Parser.SrcLoc
+                    , Muninn.Parser.Lexer
+                    , Muninn.Parser.AST
+                    , Muninn.Parser.JSON
+    build-depends:    base ^>=4.20.2.0
+                    , array
+                    , containers
+                    , text
+                    , aeson
+                    , bytestring
+                    , megaparsec
+                    , parser-combinators
+                    , mtl
+    default-language: GHC2024
+
+executable muninn
+    import:           warnings, extensions
+    hs-source-dirs:   app
+    main-is:          Main.hs
+    build-depends:    base ^>=4.20.2.0
+                    , muninn
+                    , optparse-applicative
+                    , text
+                    , bytestring
+                    , aeson
+    default-language: GHC2024
+
+test-suite parser-test
+    import:           warnings, extensions
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test/parser
+    main-is:          Main.hs
+    build-depends:    base ^>=4.20.2.0
+                    , muninn
+                    , tasty
+                    , tasty-hunit
+                    , bytestring
+                    , aeson
+                    , filepath
+                    , directory
+    default-language: GHC2024
