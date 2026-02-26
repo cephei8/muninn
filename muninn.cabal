@@ -22,6 +22,11 @@ library
                     , Muninn.Parser.Lexer
                     , Muninn.Parser.AST
                     , Muninn.Parser.JSON
+                    , Muninn.Formatter
+                    , Muninn.Formatter.Print
+                    , Muninn.Formatter.Stmt
+                    , Muninn.Formatter.Expr
+                    , Muninn.Formatter.Support
     build-depends:    base ^>=4.20.2.0
                     , array
                     , containers
@@ -43,6 +48,8 @@ executable muninn
                     , text
                     , bytestring
                     , aeson
+                    , directory
+                    , filepath
     default-language: GHC2024
 
 test-suite parser-test
@@ -56,6 +63,24 @@ test-suite parser-test
                     , tasty-hunit
                     , bytestring
                     , aeson
+                    , filepath
+                    , directory
+    default-language: GHC2024
+
+test-suite formatter-test
+    import:           warnings, extensions
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test/formatter
+    main-is:          Main.hs
+    build-depends:    base ^>=4.20.2.0
+                    , muninn
+                    , tasty
+                    , tasty-hunit
+                    , aeson
+                    , aeson-pretty
+                    , bytestring
+                    , text
+                    , vector
                     , filepath
                     , directory
     default-language: GHC2024

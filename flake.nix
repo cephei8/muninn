@@ -16,7 +16,7 @@
       {
         packages.testgen-parser = pkgs.stdenv.mkDerivation {
           name = "testgen-parser";
-          src = ./test/parser/testgen;
+          src = ./testgen/parser;
           nativeBuildInputs = [ pkgs.odin ];
           buildPhase = ''
             odin build . -o:none -out:testgen

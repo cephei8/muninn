@@ -2,6 +2,14 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Muninn.Parser.JSON
   ( fileToJSON
+  , showBinOp
+  , showUnaryOp
+  , showAssignOp
+  , showBranchKind
+  , showCastKind
+  , showStructFlag
+  , showUnionFlag
+  , showFieldFlag
   ) where
 
 import Data.Aeson (ToJSON (..), Value (..), object, (.=))
