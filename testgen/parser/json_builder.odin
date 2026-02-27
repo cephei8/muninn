@@ -63,7 +63,6 @@ exprs_to_json :: proc(es: []^ast.Expr) -> json.Value {
 stmts_to_json :: proc(ss: []^ast.Stmt) -> json.Value {
 	arr := make(json.Array, 0, len(ss))
 	for s in ss {
-		// Skip Empty_Stmt nodes - Haskell parser doesn't produce them
 		if s.derived_stmt == nil {
 			continue
 		}

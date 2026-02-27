@@ -14,6 +14,9 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {
+        packages.default = pkgs.haskell.lib.dontCheck
+          (pkgs.haskellPackages.callCabal2nix "muninn" self { });
+
         packages.testgen-parser = pkgs.stdenv.mkDerivation {
           name = "testgen-parser";
           src = ./testgen/parser;
@@ -41,7 +44,7 @@
             cabal-install
 
             haskell-language-server
-
+            fourmolu
 
             odin
           ];

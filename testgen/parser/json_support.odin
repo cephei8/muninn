@@ -67,7 +67,6 @@ bit_field_field_to_json :: proc(f: ^ast.Bit_Field_Field) -> json.Value {
 	m["node"] = json.String("BitFieldField")
 	m["pos"] = p
 	m["end"] = e
-	// Odin parser bug: parse_ident() produces Ident{name="_"} for keywords as bit_field field names
 	m["name"] = expr_to_json(f.name)
 	m["type"] = expr_to_json(f.type)
 	m["size"] = expr_to_json(f.bit_size)

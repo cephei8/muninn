@@ -46,8 +46,6 @@ parse_to_json :: proc(path: string) -> (string, bool) {
 	f.src = src
 	f.fullpath = path
 
-	// Odin parser bug: parse_file() rejects reserved package names ("builtin", "intrinsics").
-	// We still emit JSON for these files (pkg_name is set, decls empty).
 	parser.parse_file(&p, f)
 
 	result := file_to_json(f)
@@ -64,7 +62,6 @@ file_to_json :: proc(f: ^ast.File) -> json.Value {
 	p := pos_to_json(f.pos)
 	e := pos_to_json(f.end)
 
-	// Comments
 	comments := make(json.Array, 0, len(f.comments))
 	for cg in f.comments {
 		append(&comments, comment_group_to_json(cg))
@@ -73,7 +70,6 @@ file_to_json :: proc(f: ^ast.File) -> json.Value {
 
 	m["decls"] = stmts_to_json(f.decls[:])
 
-	// Docs
 	if f.docs != nil {
 		m["docs"] = comment_group_to_json(f.docs)
 	} else {

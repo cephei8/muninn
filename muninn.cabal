@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               muninn
-version:            0.1.0.0
+version:            0.0.0.1
 homepage:           https://github.com/cephei8/muninn
 license:            MIT
 license-file:       LICENSE
@@ -9,7 +9,10 @@ maintainer:         i@cephei8.dev
 build-type:         Simple
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates
+                 -Wincomplete-uni-patterns -Wmissing-home-modules
+                 -Wpartial-fields -Wredundant-constraints -Wunused-packages
+                 -Werror
 
 common extensions
     default-extensions: OverloadedStrings
@@ -23,19 +26,20 @@ library
                     , Muninn.Parser.AST
                     , Muninn.Parser.JSON
                     , Muninn.Formatter
+                    , Muninn.Formatter.Config
+                    , Muninn.Formatter.ConfigFile
                     , Muninn.Formatter.Print
                     , Muninn.Formatter.Stmt
                     , Muninn.Formatter.Expr
-                    , Muninn.Formatter.Support
     build-depends:    base ^>=4.20.2.0
                     , array
                     , containers
                     , text
                     , aeson
-                    , bytestring
                     , megaparsec
-                    , parser-combinators
                     , mtl
+                    , directory
+                    , filepath
     default-language: GHC2024
 
 executable muninn
@@ -48,6 +52,7 @@ executable muninn
                     , text
                     , bytestring
                     , aeson
+                    , Diff
                     , directory
                     , filepath
     default-language: GHC2024
@@ -83,4 +88,6 @@ test-suite formatter-test
                     , vector
                     , filepath
                     , directory
+                    , process
+                    , temporary
     default-language: GHC2024

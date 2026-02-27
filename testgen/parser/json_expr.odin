@@ -104,7 +104,6 @@ expr_to_json :: proc(e: ^ast.Expr) -> json.Value {
 		return m
 
 	case ^ast.Selector_Call_Expr:
-		// Not in Haskell AST — recurse into underlying call
 		return call_expr_to_json(n.call)
 
 	case ^ast.Deref_Expr:
@@ -269,8 +268,6 @@ expr_to_json :: proc(e: ^ast.Expr) -> json.Value {
 		m["pos"] = p
 		m["end"] = end
 		m["name"] = json.String(clone_string(n.name))
-		// Basic_Directive doesn't have an expr field in Odin AST,
-		// but our Haskell AST has an optional expr. We use null.
 		m["expr"] = nil
 		return m
 
@@ -492,7 +489,6 @@ call_expr_to_json :: proc(n: ^ast.Call_Expr) -> json.Value {
 	m["end"] = end
 	m["func"] = expr_to_json(n.expr)
 	m["args"] = exprs_to_json(n.args)
-	// ellipsis is true when the ellipsis token position is non-zero
 	has_ellipsis := n.ellipsis.pos.offset != 0
 	m["ellipsis"] = json.Boolean(has_ellipsis)
 	return m

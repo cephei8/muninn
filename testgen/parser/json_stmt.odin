@@ -253,9 +253,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		return m
 
 	case ^ast.Unroll_Range_Stmt:
-		// #unroll for / #inline for — Muninn absorbs the directive and outputs a RangeStmt
 		m := make(json.Object)
-		// Use for_pos as start (Muninn positions at "for", not "#unroll")
 		_, end := node_pos_end(&n.node.stmt_base)
 		m["node"] = json.String("RangeStmt")
 		m["pos"] = pos_to_json(n.for_pos)
