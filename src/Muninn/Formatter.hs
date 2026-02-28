@@ -10,8 +10,8 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Muninn.Formatter.Config (FmtConfig (..), defaultFmtConfig)
 import Muninn.Formatter.Print
-import Muninn.Formatter.Stmt (fmtStmt)
-import Muninn.Parser (parseFile)
+import Muninn.Formatter.Stmt (fmtStmt, stmtLeadingStart)
+import Muninn.Parser (parseOdin)
 import Muninn.Parser.AST
 import Muninn.Parser.SrcLoc (SrcPos (..), SrcSpan (..))
 
@@ -29,8 +29,7 @@ formatFile = formatFileWith defaultFmtConfig
 formatFileWith :: FmtConfig -> FilePath -> IO (Either String Text)
 formatFileWith cfg path = do
     src <- TIO.readFile path
-    result <- parseFile path
-    case result of
+    case parseOdin path src of
         Left err -> pure (Left err)
         Right ast -> pure (Right (formatOdinWith cfg (Just src) ast))
 
@@ -42,9 +41,11 @@ fmtFile (File _sp pkg decls _comments docs) = do
     case decls of
         [] -> do
             newline
+            setLastLine 0
             drainRemainingComments
         _ -> do
             newline
+            setLastLine 0
             fmtDeclList decls
             drainRemainingComments
             emit "\n"
@@ -60,27 +61,32 @@ fmtDeclList :: [Stmt SrcSpan] -> Printer ()
 fmtDeclList decls = mapM_ fmtOneDecl decls
   where
     fmtOneDecl d = do
-        let off = posOffset (spanStart (stmtSpan d))
-            ln = posLine (spanStart (stmtSpan d))
+        let sp = stmtLeadingStart d
+            off = posOffset sp
+            ln = posLine sp
         drainCommentsBefore off
         emitBlankLineSep ln
         newline
         fmtStmt d
-        drainLineCommentAfter (posLine (spanEnd (stmtSpan d)))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan d))) maxBound
         setLastLine (posLine (spanEnd (stmtSpan d)))
 
 fmtFileWithPragmas :: FmtConfig -> Text -> File SrcSpan -> Printer ()
 fmtFileWithPragmas _cfg src (File _sp pkg decls comments docs) = do
     let disabled = findDisabledRanges comments
     emitDocComment docs
+    let pragmas = extractPragmas docs src
+    mapM_ (\p -> emit p >> emit "\n") pragmas
     emit "package "
     emit pkg
     case decls of
         [] -> do
             newline
+            setLastLine 0
             drainRemainingComments
         _ -> do
             newline
+            setLastLine 0
             fmtDeclListWithPragmas disabled src decls
             drainRemainingComments
             emit "\n"
@@ -92,15 +98,15 @@ fmtDeclListWithPragmas disabled src (d : ds) = do
     mapM_ fmtOne ds
   where
     fmtOne decl = do
-        let sp = stmtSpan decl
-            off = posOffset (spanStart sp)
-            ln = posLine (spanStart sp)
+        let leadSp = stmtLeadingStart decl
+            off = posOffset leadSp
+            ln = posLine leadSp
         drainCommentsBefore off
         emitBlankLineSep ln
         newline
         fmtOneDeclWithPragma disabled src decl
-        drainLineCommentAfter (posLine (spanEnd sp))
-        setLastLine (posLine (spanEnd sp))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan decl))) maxBound
+        setLastLine (posLine (spanEnd (stmtSpan decl)))
 
 fmtOneDeclWithPragma :: [(Int, Int)] -> Text -> Stmt SrcSpan -> Printer ()
 fmtOneDeclWithPragma disabled src decl = do
@@ -114,6 +120,19 @@ fmtOneDeclWithPragma disabled src decl = do
             emit verbatim
         else
             fmtStmt decl
+
+extractPragmas :: Maybe CommentGroup -> Text -> [Text]
+extractPragmas mDoc src =
+    let afterDoc = case mDoc of
+            Nothing -> 0
+            Just cg -> posOffset (spanEnd (cgSpan cg))
+        -- Take the source text from after the doc comment to end of file,
+        -- then find lines starting with #+
+        region = T.drop afterDoc src
+        lns = T.lines region
+     in filter (\l -> T.isPrefixOf "#+" (T.stripStart l)) (takeWhile (not . isPkgLine) lns)
+  where
+    isPkgLine l = T.isPrefixOf "package " (T.stripStart l)
 
 textSlice :: Int -> Int -> Text -> Text
 textSlice start end t = T.take (end - start) (T.drop start t)

@@ -285,9 +285,8 @@ adjustEndLines :: [RawComment] -> Int -> [RawComment]
 adjustEndLines [] _ = []
 adjustEndLines [rc] nextTokLine =
     [rc{rcEndLine = rcEndLine rc + if nextTokLine > rcStartLine rc then 1 else 0}]
-adjustEndLines (rc : rcs@(next : _)) nextTokLine =
-    rc{rcEndLine = rcEndLine rc + if rcStartLine next > rcStartLine rc then 1 else 0}
-        : adjustEndLines rcs nextTokLine
+adjustEndLines (rc : rcs) nextTokLine =
+    rc : adjustEndLines rcs nextTokLine
 
 groupComments ::
     Int ->
@@ -645,7 +644,7 @@ floatLit = try hexFloatLit <|> decFloatLit
 
 decFloatLit :: Parser Double
 decFloatLit = do
-    raw <- try withDot <|> withoutDot
+    raw <- try withDot <|> try dotLeading <|> withoutDot
     pure $ parseDoubleOrZero raw
   where
     withDot = do
@@ -655,6 +654,13 @@ decFloatLit = do
         fracPart <- takeWhileP Nothing (\c -> isDigit c || c == '_') -- empty fracPart valid: "1."
         expPart <- optional pExponent
         pure $ intPart <> "." <> fracPart <> fromMaybe "" expPart
+    dotLeading = do
+        void $ char '.'
+        MP.notFollowedBy (char '.')
+        firstDigit <- T.singleton <$> satisfy isDigit
+        rest <- takeWhileP Nothing (\c -> isDigit c || c == '_')
+        expPart <- optional pExponent
+        pure $ "." <> firstDigit <> rest <> fromMaybe "" expPart
     withoutDot = do
         intPart <- takeWhile1P Nothing (\c -> isDigit c || c == '_')
         expPart <- pExponent

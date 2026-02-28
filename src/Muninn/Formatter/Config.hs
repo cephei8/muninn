@@ -21,5 +21,5 @@ defaultFmtConfig =
         { cfgLineWidth = 100
         , cfgIndentWidth = 4
         , cfgNewlineLimit = 2
-        , cfgIndentStyle = Spaces
+        , cfgIndentStyle = Tabs
         }

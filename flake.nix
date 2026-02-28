@@ -33,7 +33,7 @@
         apps.testgen-parser = {
           type = "app";
           program = toString (pkgs.writeShellScript "testgen-parser" ''
-            ${self.packages.${system}.testgen-parser}/bin/testgen-parser generate "${odin-src}" test/parser/golden-stdlib core vendor base
+            ${self.packages.${system}.testgen-parser}/bin/testgen-parser generate "${odin-src}" test/parser/golden-stdlib core vendor base tests
             ${self.packages.${system}.testgen-parser}/bin/testgen-parser generate "${ols-src}" test/parser/golden-ols src tests tools builtin
           '');
         };

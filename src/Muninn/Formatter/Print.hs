@@ -12,6 +12,8 @@ module Muninn.Formatter.Print (
     brackets,
     sepBy,
     getConfig,
+    getColumn,
+    tryInline,
     drainCommentsBefore,
     setLastLine,
     getLastLine,
@@ -24,7 +26,7 @@ module Muninn.Formatter.Print (
 
 import Control.Monad (when)
 import Control.Monad.Reader (ReaderT, asks, local, runReaderT)
-import Control.Monad.State.Strict (State, execState, gets, modify')
+import Control.Monad.State.Strict (State, execState, get, gets, modify', put)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -38,6 +40,7 @@ import Muninn.Parser.SrcLoc (SrcPos (..), SrcSpan (..))
 data PrintEnv = PrintEnv
     { peDepth :: !Int
     , peConfig :: !FmtConfig
+    , peForceInline :: !Bool
     }
 
 data PrintState = PrintState
@@ -45,6 +48,8 @@ data PrintState = PrintState
     , psComments :: [CommentGroup]
     , psLastLine :: !Int
     , psAfterInlineComment :: !Bool
+    , psColumn :: !Int
+    , psNewlineCount :: !Int
     }
 
 type Printer a = ReaderT PrintEnv (State PrintState) a
@@ -53,24 +58,25 @@ runPrinter :: FmtConfig -> [CommentGroup] -> Printer () -> Text
 runPrinter cfg comments p =
     TL.toStrict $ B.toLazyText $ psBuilder $ execState (runReaderT p env0) st0
   where
-    env0 = PrintEnv{peDepth = 0, peConfig = cfg}
-    st0 = PrintState{psBuilder = mempty, psComments = comments, psLastLine = 0, psAfterInlineComment = False}
+    env0 = PrintEnv{peDepth = 0, peConfig = cfg, peForceInline = False}
+    st0 = PrintState{psBuilder = mempty, psComments = comments, psLastLine = 0, psAfterInlineComment = False, psColumn = 0, psNewlineCount = 0}
 
 emit :: Text -> Printer ()
-emit t = modify' (\s -> s{psBuilder = psBuilder s <> B.fromText t})
+emit t = modify' (\s -> s{psBuilder = psBuilder s <> B.fromText t, psColumn = psColumn s + T.length t})
 
 emitIndent :: Printer ()
 emitIndent = do
     depth <- asks peDepth
     style <- asks (cfgIndentStyle . peConfig)
     width <- asks (cfgIndentWidth . peConfig)
-    case style of
-        Tabs -> emit (T.replicate depth "\t")
-        Spaces -> emit (T.replicate (depth * width) " ")
+    let (txt, col) = case style of
+            Tabs -> (T.replicate depth "\t", depth * width)
+            Spaces -> let n = depth * width in (T.replicate n " ", n)
+    modify' (\s -> s{psBuilder = psBuilder s <> B.fromText txt, psColumn = col})
 
 newline :: Printer ()
 newline = do
-    emit "\n"
+    modify' (\s -> s{psBuilder = psBuilder s <> B.singleton '\n', psColumn = 0, psNewlineCount = psNewlineCount s + 1, psAfterInlineComment = False})
     emitIndent
 
 space :: Printer ()
@@ -81,6 +87,24 @@ withIndent = local (\env -> env{peDepth = peDepth env + 1})
 
 getConfig :: Printer FmtConfig
 getConfig = asks peConfig
+
+getColumn :: Printer Int
+getColumn = gets psColumn
+
+tryInline :: Printer () -> Printer () -> Printer ()
+tryInline inline multiLine = do
+    forceInline <- asks peForceInline
+    if forceInline
+        then inline
+        else do
+            cfg <- getConfig
+            st <- get
+            local (\e -> e{peForceInline = True}) inline
+            col <- getColumn
+            nlCount <- gets psNewlineCount
+            if col > cfgLineWidth cfg || nlCount > psNewlineCount st
+                then put st >> multiLine
+                else pure ()
 
 bracesBlock :: Printer () -> Printer ()
 bracesBlock body = do
@@ -132,13 +156,18 @@ drainCommentsBefore offset = do
     modify' (\s -> s{psComments = after})
     emitCommentGroupsSep before
 
-drainLineCommentAfter :: Int -> Printer ()
-drainLineCommentAfter srcLine = do
+-- | Drain a single-line comment group that sits on @srcLine@ and whose start
+-- offset is strictly less than @maxOffset@.  The @maxOffset@ bound prevents a
+-- comment from being claimed by an earlier item when multiple items share the
+-- same source line (e.g. all proc params written on one line).
+drainLineCommentAfter :: Int -> Int -> Printer ()
+drainLineCommentAfter srcLine maxOffset = do
     cgs <- gets psComments
     case cgs of
         (cg : rest)
             | posLine (spanStart (cgSpan cg)) == srcLine
-            , posLine (spanEnd (cgSpan cg)) == srcLine -> do
+            , posLine (spanEnd (cgSpan cg)) == srcLine
+            , posOffset (spanStart (cgSpan cg)) < maxOffset -> do
                 modify' (\s -> s{psComments = rest, psAfterInlineComment = True})
                 mapM_ (\(Comment _ text) -> emit " " >> emit text) (cgList cg)
         _ -> pure ()
@@ -168,7 +197,7 @@ emitCommentGroupsSep (cg : rest) = do
     mapM_ emitGroupFixedSep rest
   where
     emitGroupFixedSep (CommentGroup cgsp comments) = do
-        emit "\n\n"
+        emit "\n"
         mapM_ (\(Comment _pos text) -> newline >> emit text) comments
         setLastLine (posLine (spanEnd cgsp))
 

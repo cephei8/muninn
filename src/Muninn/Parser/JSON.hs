@@ -63,7 +63,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "values" .= map toJSON vals
                 , "is_mutable" .= mut
                 ]
-        ImportDecl sp alias path ->
+        ImportDecl sp _attrs alias path ->
             object
                 [ "node" .= ("ImportDecl" :: Text)
                 , "pos" .= spanStart sp
@@ -71,7 +71,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "alias" .= alias
                 , "path" .= path
                 ]
-        ForeignImportDecl sp name paths ->
+        ForeignImportDecl sp _attrs name paths ->
             object
                 [ "node" .= ("ForeignImportDecl" :: Text)
                 , "pos" .= spanStart sp
@@ -79,7 +79,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "name" .= name
                 , "paths" .= paths
                 ]
-        ForeignBlockDecl sp lib body ->
+        ForeignBlockDecl sp _attrs lib body ->
             object
                 [ "node" .= ("ForeignBlockDecl" :: Text)
                 , "pos" .= spanStart sp
@@ -110,7 +110,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "op" .= showAssignOp op
                 , "rhs" .= map toJSON rhs
                 ]
-        BlockStmt sp label stmts ->
+        BlockStmt sp label stmts _isDo ->
             object
                 [ "node" .= ("BlockStmt" :: Text)
                 , "pos" .= spanStart sp
@@ -219,6 +219,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "end" .= spanEnd sp
                 , "exprs" .= map toJSON exprs
                 ]
+        DirectiveStmt _sp _name inner -> toJSON inner
         BadStmt sp ->
             object
                 [ "node" .= ("BadStmt" :: Text)
@@ -302,7 +303,7 @@ instance ToJSON (Expr SrcSpan) where
                 , "low" .= fmap toJSON lo
                 , "high" .= fmap toJSON hi
                 ]
-        SelectorExpr sp e sel ->
+        SelectorExpr sp e sel _isArrow ->
             object
                 [ "node" .= ("SelectorExpr" :: Text)
                 , "pos" .= spanStart sp
@@ -332,7 +333,7 @@ instance ToJSON (Expr SrcSpan) where
                 , "type" .= fmap toJSON ty
                 , "elems" .= map toJSON elems
                 ]
-        ProcLit sp ty body ->
+        ProcLit sp _mDir ty _tags body ->
             object
                 [ "node" .= ("ProcLit" :: Text)
                 , "pos" .= spanStart sp
@@ -456,14 +457,13 @@ instance ToJSON (Expr SrcSpan) where
                 , "tag" .= tag
                 , "expr" .= toJSON e
                 ]
-        PointerType sp e tag ->
-            object $
+        PointerType sp e _tag ->
+            object
                 [ "node" .= ("PointerType" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
                 , "elem" .= toJSON e
                 ]
-                    ++ maybe [] (\t -> ["tag" .= toJSON t]) tag
         MultiPointerType sp e ->
             object
                 [ "node" .= ("MultiPointerType" :: Text)
@@ -471,23 +471,21 @@ instance ToJSON (Expr SrcSpan) where
                 , "end" .= spanEnd sp
                 , "elem" .= toJSON e
                 ]
-        ArrayType sp len elem_ tag ->
-            object $
+        ArrayType sp len elem_ _tag ->
+            object
                 [ "node" .= ("ArrayType" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
                 , "len" .= fmap toJSON len
                 , "elem" .= toJSON elem_
                 ]
-                    ++ maybe [] (\t -> ["tag" .= toJSON t]) tag
-        DynamicArrayType sp e tag ->
-            object $
+        DynamicArrayType sp e _tag ->
+            object
                 [ "node" .= ("DynamicArrayType" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
                 , "elem" .= toJSON e
                 ]
-                    ++ maybe [] (\t -> ["tag" .= toJSON t]) tag
         MapType sp k v ->
             object
                 [ "node" .= ("MapType" :: Text)
@@ -538,7 +536,7 @@ instance ToJSON (Expr SrcSpan) where
                 , "backing_type" .= fmap toJSON backing
                 , "fields" .= map toJSON fields
                 ]
-        ProcType sp params results cc ->
+        ProcType sp params results _isDiverging cc _whereExprs ->
             object
                 [ "node" .= ("ProcType" :: Text)
                 , "pos" .= spanStart sp

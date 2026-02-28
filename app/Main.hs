@@ -153,19 +153,31 @@ runFiles cfg fmtOp path = do
             diffs <- forM files (diffOneFileJSON cfg)
             let nonEmpty = filter (\(_, d) -> not (T.null d)) diffs
             BL.putStrLn $ encode [object ["file" .= f, "diff" .= d] | (f, d) <- nonEmpty]
-        else
-          forM_ files (formatOneFile cfg (fmtDryRun fmtOp))
+        else do
+          results <- forM files (formatOneFile cfg (fmtDryRun fmtOp))
+          when (not (fmtDryRun fmtOp)) $ do
+            let nFormatted = length (filter id results)
+                nSkipped = length results - nFormatted
+            putStrLn $ show nFormatted ++ " formatted, " ++ show nSkipped ++ " skipped"
 
-formatOneFile :: FmtConfig -> Bool -> FilePath -> IO ()
+-- Returns True if the file was changed (formatted), False if already correct.
+formatOneFile :: FmtConfig -> Bool -> FilePath -> IO Bool
 formatOneFile cfg dryRun path = do
-  result <- formatFileWith cfg path
-  case result of
-    Left err -> hPutStrLn stderr $ "Error formatting " ++ path ++ ": " ++ err
-    Right formatted
-      | dryRun -> TIO.putStr formatted
-      | otherwise -> do
-          TIO.writeFile path formatted
-          putStrLn $ "Formatted: " ++ path
+  src <- TIO.readFile path
+  case parseOdin path src of
+    Left err -> do
+      hPutStrLn stderr $ "Error formatting " ++ path ++ ": " ++ err
+      pure False
+    Right ast -> do
+      let formatted = formatOdinWith cfg (Just src) ast
+      if dryRun
+        then TIO.putStr formatted >> pure False
+        else if formatted == src
+          then pure False
+          else do
+            TIO.writeFile path formatted
+            putStrLn $ "Formatted: " ++ path
+            pure True
 
 checkOneFile :: FmtConfig -> FilePath -> IO (FilePath, Bool)
 checkOneFile cfg path = do

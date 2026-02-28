@@ -27,6 +27,7 @@ parseFile path = do
 parseOdin :: FilePath -> Text -> Either String (File SrcSpan)
 parseOdin = runMuninnParser pFile
 
+
 {- | In Odin's parser, a bare 'typeid' in a parameter position gets end==pos due to a
 tokenizer look-ahead quirk.  This does NOT apply in result positions.
 Collapse the TypeidType span and adjust the field's own end accordingly.
@@ -72,22 +73,12 @@ pFile = do
             let docs = psLeadComment st0
             keyword "package"
             pkg <- ident
-            -- Odin parser bug: parse_file() rejects reserved package names ("builtin",
-            -- "intrinsics"). We match this: return File with zeroed span and empty decls.
-            if pkg `elem` ["builtin", "intrinsics"]
-                then do
-                    void MP.takeRest
-                    st <- lift get
-                    let zeroPos = SrcPos 0 0 0
-                    let comments = sortOn (\(CommentGroup sp _) -> posOffset (spanStart sp)) (psCommentGroups st)
-                    pure $ File (SrcSpan zeroPos zeroPos) pkg [] comments docs
-                else do
-                    semi
-                    decls <- many pTopDecl
-                    sp <- spanFrom start
-                    st <- lift get
-                    let comments = sortOn (\(CommentGroup csp _) -> posOffset (spanStart csp)) (psCommentGroups st)
-                    pure $ File sp pkg decls comments docs
+            semi
+            decls <- many pTopDecl
+            sp <- spanFrom start
+            st <- lift get
+            let comments = sortOn (\(CommentGroup csp _) -> posOffset (spanStart csp)) (psCommentGroups st)
+            pure $ File sp pkg decls comments docs
 
 pTopDecl :: Parser (Stmt SrcSpan)
 pTopDecl =
@@ -123,7 +114,7 @@ pImportDecl = do
     keyword "import"
     (alias, path) <- try aliasedImport <|> simpleImport
     sp <- spanFrom start
-    pure $ ImportDecl sp alias path
+    pure $ ImportDecl sp [] alias path
   where
     aliasedImport = do
         alias <- ident
@@ -144,7 +135,7 @@ pForeignBlock = do
             Nothing -> Just (Ident (SrcSpan start foreignEnd) "_")
     body <- pBlock
     sp <- spanFrom start
-    pure $ ForeignBlockDecl sp lib' body
+    pure $ ForeignBlockDecl sp [] lib' body
 
 pForeignImport :: Parser (Stmt SrcSpan)
 pForeignImport = do
@@ -153,7 +144,7 @@ pForeignImport = do
     keyword "import"
     (name, paths) <- try namedImport <|> unnamedImport
     sp <- spanFrom start
-    pure $ ForeignImportDecl sp name paths
+    pure $ ForeignImportDecl sp [] name paths
   where
     namedImport = do
         name <- ident
@@ -241,8 +232,10 @@ pDirectiveBlock = do
         "unroll" -> pForStmt
         _ -> fail $ "not a statement directive"
   where
-    pDirectiveBody _start _name = do
-        choice [pBlock, pForStmt, pSwitchStmt, pIfStmt, pWhenStmt, pReturnStmt, pExprOrDeclOrAssign]
+    pDirectiveBody start name = do
+        inner <- choice [pBlock, pForStmt, pSwitchStmt, pIfStmt, pWhenStmt, pReturnStmt, pExprOrDeclOrAssign]
+        let end = spanEnd (stmtSpan inner)
+        pure $ DirectiveStmt (SrcSpan start end) name inner
 
 pLabeledStmt :: Parser (Stmt SrcSpan)
 pLabeledStmt = do
@@ -260,12 +253,13 @@ pLabeledStmt = do
             lift $ put savedSt
             fail "expected labeled statement"
   where
-    applyLabel lbl (BlockStmt sp _ stmts) = BlockStmt sp (Just lbl) stmts
+    applyLabel lbl (BlockStmt sp _ stmts isDo) = BlockStmt sp (Just lbl) stmts isDo
     applyLabel lbl (ForStmt sp _ ini cond post body) = ForStmt sp (Just lbl) ini cond post body
     applyLabel lbl (RangeStmt sp _ vals range body rev) = RangeStmt sp (Just lbl) vals range body rev
     applyLabel lbl (SwitchStmt sp _ ini tag body partial) = SwitchStmt sp (Just lbl) ini tag body partial
     applyLabel lbl (TypeSwitchStmt sp _ ini tag body partial) = TypeSwitchStmt sp (Just lbl) ini tag body partial
     applyLabel lbl (IfStmt sp _ ini cond body els) = IfStmt sp (Just lbl) ini cond body els
+    applyLabel lbl (DirectiveStmt sp name inner) = DirectiveStmt sp name (applyLabel lbl inner)
     applyLabel _ s = s
 
 pExprOrDeclOrAssign :: Parser (Stmt SrcSpan)
@@ -363,7 +357,7 @@ pBlock = do
     rbrace
     lift $ modify $ \s -> s{psExprLevel = savedExprLevel}
     sp <- spanFrom start
-    pure $ BlockStmt sp Nothing stmts
+    pure $ BlockStmt sp Nothing stmts False
 
 -- Must save/restore PState since pBlock modifies state (clearPendingSemi) before
 -- potentially failing at lbrace.
@@ -378,7 +372,7 @@ pBlockOrDo = do
             stmt <- pSimpleStmt
             let sp = stmtSpan stmt
             lift $ modify $ \s -> s{psEndPos = spanEnd sp}
-            pure $ BlockStmt sp Nothing [stmt]
+            pure $ BlockStmt sp Nothing [stmt] True
         ]
 
 pBlockStmt :: Parser (Stmt SrcSpan)
@@ -621,7 +615,7 @@ pSwitchBody = do
     rbrace
     lift $ modify $ \s -> s{psExprLevel = savedExprLevel}
     sp <- spanFrom start
-    pure $ BlockStmt sp Nothing clauses
+    pure $ BlockStmt sp Nothing clauses False
 
 pCaseClause :: Parser (Stmt SrcSpan)
 pCaseClause = do
@@ -954,7 +948,7 @@ pPostfixChain allowCompLit e =
             selStart <- getPos
             name <- ident
             ep <- endPos
-            let selExpr = SelectorExpr (exprSpan e <-> SrcSpan ep ep) e (Ident (SrcSpan selStart ep) name)
+            let selExpr = SelectorExpr (exprSpan e <-> SrcSpan ep ep) e (Ident (SrcSpan selStart ep) name) True
             lparen
             (args, hasEllipsis) <- pCallArgs
             rparen
@@ -967,7 +961,7 @@ pPostfixChain allowCompLit e =
             name <- ident
             ep <- endPos
             let sp = exprSpan e <-> SrcSpan ep ep
-            pPostfixChain allowCompLit (SelectorExpr sp e (Ident (SrcSpan selStart ep) name))
+            pPostfixChain allowCompLit (SelectorExpr sp e (Ident (SrcSpan selStart ep) name) False)
         , try $ do
             dot
             qStart <- getPos
@@ -1216,8 +1210,9 @@ pDirectiveExpr untypedCL typedCL = do
             ty <- pUnaryExpr' True
             sp <- spanFrom start
             pure $ HelperType sp ty
-        "force_inline" -> pProcLitAfterDirective start <|> pUnaryExprImpl untypedCL typedCL
-        "force_no_inline" -> pProcLitAfterDirective start <|> pUnaryExprImpl untypedCL typedCL
+        "force_inline" -> pProcLitAfterDirective start (Just name) <|> pUnaryExprImpl untypedCL typedCL
+        "force_no_inline" -> pProcLitAfterDirective start (Just name) <|> pUnaryExprImpl untypedCL typedCL
+        "partial" -> pUnaryExpr' typedCL
         "simd" -> pTaggedType start name
         "soa" -> pTaggedType start name
         "sparse" -> pTaggedType start name
@@ -1229,15 +1224,18 @@ pDirectiveExpr untypedCL typedCL = do
             let sp = SrcSpan start nameEnd
             pure $ BasicDirective sp name Nothing
   where
-    pTaggedType _dirStart _name = do
+    pTaggedType dirStart name = do
+        nameEnd <- endPos
+        let tagSp = SrcSpan dirStart nameEnd
+            tag = BasicDirective tagSp name Nothing
         choice
-            [ pArrayOrSliceType' Nothing
+            [ pArrayOrSliceType' (Just tag)
             , do
                 pStart <- getPos
                 op "^"
                 e <- pUnaryExprNoCompLit
                 let sp = SrcSpan pStart (spanEnd (exprSpan e))
-                pure $ PointerType sp e Nothing
+                pure $ PointerType sp e (Just tag)
             ]
     -- Odin's parser sets Tag_Expr end to inner expression's start position
     pMatrixTagExpr dirStart tagName = do
@@ -1290,14 +1288,13 @@ pContextExpr = do
 pProcLit :: Parser (Expr SrcSpan)
 pProcLit = do
     start <- getPos
-    _ <- optional $ try $ do op "#"; ident
-    pProcLitAfterDirective start
+    mDir <- optional $ try $ do op "#"; ident
+    pProcLitAfterDirective start mDir
 
-pProcLitAfterDirective :: SrcPos -> Parser (Expr SrcSpan)
-pProcLitAfterDirective _directiveStart = do
+pProcLitAfterDirective :: SrcPos -> Maybe Text -> Parser (Expr SrcSpan)
+pProcLitAfterDirective _directiveStart mDir = do
     ty <- pProcType
-    let procStart = spanStart (exprSpan ty)
-    _ <- many $ try $ do
+    tags <- many $ try $ do
         clearPendingSemi
         op "#"
         ident
@@ -1308,8 +1305,8 @@ pProcLitAfterDirective _directiveStart = do
                 op "---"
                 pure Nothing
             ]
-    sp <- spanFrom procStart
-    pure $ ProcLit sp ty body
+    sp <- spanFrom (spanStart (exprSpan ty))
+    pure $ ProcLit sp mDir ty tags body
 
 pProcGroup :: Parser (Expr SrcSpan)
 pProcGroup = do
@@ -1369,13 +1366,13 @@ pArrayOrSliceType' tag = do
         [ try $ do
             op "^"
             rbracket
-            e <- pUnaryExprNoCompLit
+            e <- pResultType
             let sp = SrcSpan start (spanEnd (exprSpan e))
             pure $ MultiPointerType sp e
         , try $ do
             keyword "dynamic"
             rbracket
-            e <- pUnaryExprNoCompLit
+            e <- pResultType
             let sp = SrcSpan start (spanEnd (exprSpan e))
             pure $ DynamicArrayType sp e tag
         , try $ do
@@ -1383,19 +1380,19 @@ pArrayOrSliceType' tag = do
             op "?"
             qEnd <- endPos
             rbracket
-            e <- pUnaryExprNoCompLit
+            e <- pResultType
             let sp = SrcSpan start (spanEnd (exprSpan e))
             let autoLen = UnaryExpr (SrcSpan qStart qEnd) OpQuestion Nothing
             pure $ ArrayType sp (Just autoLen) e tag
         , try $ do
             rbracket
-            e <- pUnaryExprNoCompLit
+            e <- pResultType
             let sp = SrcSpan start (spanEnd (exprSpan e))
             pure $ ArrayType sp Nothing e tag
         , do
             len <- pExpr
             rbracket
-            e <- pUnaryExprNoCompLit
+            e <- pResultType
             let sp = SrcSpan start (spanEnd (exprSpan e))
             pure $ ArrayType sp (Just len) e tag
         ]
@@ -1407,7 +1404,7 @@ pMapType = do
     lbracket
     key <- pExpr
     rbracket
-    val <- pUnaryExprNoCompLit
+    val <- pResultType
     let sp = SrcSpan start (spanEnd (exprSpan val))
     pure $ MapType sp key val
 
@@ -1475,7 +1472,10 @@ pStructDirective =
             ]
 
 pStructField :: Parser (Field SrcSpan)
-pStructField = do
+pStructField = try pNamedStructField <|> pUnnamedStructField
+
+pNamedStructField :: Parser (Field SrcSpan)
+pNamedStructField = do
     flags <- pFieldFlags
     nameStart <- getPos
     names <- (try pFieldName) `sepBy1` comma
@@ -1485,6 +1485,16 @@ pStructField = do
     let sp = fieldSpan nameStart (Just ty) dflt
     tag <- optional (try pStringRaw)
     pure $ Field sp names (Just ty) dflt tag flags
+
+pUnnamedStructField :: Parser (Field SrcSpan)
+pUnnamedStructField = do
+    ty <- pExpr
+    let sp = exprSpan ty
+        nameStart = spanStart sp
+        nameEnd = nameStart{posOffset = posOffset nameStart + 1, posCol = posCol nameStart + 1}
+        nameSp = SrcSpan nameStart nameEnd
+        syntheticName = Ident nameSp "_"
+    pure $ Field sp [syntheticName] (Just ty) Nothing Nothing []
 
 pFieldFlags :: Parser [FieldFlag]
 pFieldFlags =
@@ -1511,7 +1521,7 @@ pUnionType :: Parser (Expr SrcSpan)
 pUnionType = do
     start <- getPos
     keyword "union"
-    flags <- many pUnionFlag
+    flags1 <- many pUnionFlag
     mParams <- optional $ try $ do
         lparen
         paramStart <- getPos
@@ -1521,6 +1531,8 @@ pUnionType = do
         rparen
         let ps' = map addUnderscoreName ps
         pure $ FieldList (SrcSpan paramStart paramEnd) ps'
+    flags2 <- many pUnionFlag
+    clearPendingSemi
     _where <- optional $ try $ do
         keyword "where"
         void $ pExprNoCompLit `sepBy1` comma
@@ -1531,7 +1543,7 @@ pUnionType = do
     clearPendingSemi
     rbrace
     sp <- spanFrom start
-    pure $ UnionType sp variants mParams flags
+    pure $ UnionType sp variants mParams (flags1 ++ flags2)
 
 pUnionFlag :: Parser UnionFlag
 pUnionFlag =
@@ -1627,7 +1639,7 @@ pProcType = do
     paramEnd <- getPos
     rparen
     rparenEnd <- endPos
-    (results, resultsEnd) <- do
+    (results, isDiverging, resultsEnd) <- do
         mr <- optional $ try $ do
             op "->"
             choice
@@ -1645,7 +1657,7 @@ pProcType = do
                                     { psPendingSemi = True
                                     , psSemiEndPos = ep'{posOffset = posOffset ep' + 1, posCol = posCol ep' + 1}
                                     }
-                    pure (Nothing, ep')
+                    pure (Nothing, True, ep')
                 , try $ do
                     lparen
                     resStart <- getPos
@@ -1655,29 +1667,30 @@ pProcType = do
                     rparen
                     resRparenEnd <- endPos
                     let rs' = map addUnderscoreName rs
-                    pure (Just (FieldList (SrcSpan resStart resEnd) rs'), resRparenEnd)
+                    pure (Just (FieldList (SrcSpan resStart resEnd) rs'), False, resRparenEnd)
                 , do
                     r <- pResultType
                     let rsp = exprSpan r
-                    pure (Just (FieldList rsp [Field rsp [] (Just r) Nothing Nothing []]), spanEnd rsp)
+                    pure (Just (FieldList rsp [Field rsp [] (Just r) Nothing Nothing []]), False, spanEnd rsp)
                 ]
         pure $ case mr of
-            Just (mfl, ep) -> (mfl, ep)
-            Nothing -> (Nothing, rparenEnd)
+            Just (mfl, div_, ep) -> (mfl, div_, ep)
+            Nothing -> (Nothing, False, rparenEnd)
     -- Save/restore semi state: clearPendingSemi must not persist if where fails
     savedPending <- psPendingSemi <$> lift get
     savedAuto <- psAutoSemi <$> lift get
-    _where <- optional $ try $ do
+    mWhere <- optional $ try $ do
         clearPendingSemi
         keyword "where"
         pExprNoCompLit `sepBy1` comma
-    case _where of
+    case mWhere of
         Nothing -> lift $ modify $ \s -> s{psPendingSemi = savedPending, psAutoSemi = savedAuto}
         Just _ -> pure ()
+    let whereExprs = maybe [] id mWhere
     let sp = SrcSpan start resultsEnd
     let params' = map addUnderscoreName params
     let paramList = FieldList (SrcSpan paramStart paramEnd) params'
-    pure $ ProcType sp paramList results ccVal
+    pure $ ProcType sp paramList results isDiverging ccVal whereExprs
 
 -- pProcType must come first so `proc "c" (int)` is parsed as ProcType, not ProcLit
 pResultType :: Parser (Expr SrcSpan)
@@ -1814,8 +1827,7 @@ pParam =
                     pure $ Field tsp [] (Just (Ellipsis tsp (Just ty))) Nothing Nothing []
                 Nothing -> do
                     let sp = SrcSpan start ep
-                    let badExpr = BadExpr sp
-                    pure $ Field sp [Ident sp "_"] (Just (Ellipsis sp (Just badExpr))) Nothing Nothing []
+                    pure $ Field sp [] (Just (Ellipsis sp Nothing)) Nothing Nothing []
         , do
             ty <- pExpr
             let sp = exprSpan ty
@@ -1837,7 +1849,7 @@ pMatrixType = do
     comma
     cols <- pExpr
     rbracket
-    elem_ <- pUnaryExprNoCompLit
+    elem_ <- pResultType
     let sp = SrcSpan start (spanEnd (exprSpan elem_))
     pure $ MatrixType sp rows cols elem_
 
@@ -1915,10 +1927,12 @@ pAttrElem = try pAttrFieldValue <|> pExpr
 applyAttrs :: [Attribute SrcSpan] -> Stmt SrcSpan -> Stmt SrcSpan
 applyAttrs attrs (ValueDecl sp _ names ty vals mut) =
     ValueDecl sp (reverse attrs) names ty vals mut
-applyAttrs _ (ForeignBlockDecl sp lib body) =
-    ForeignBlockDecl sp lib body
-applyAttrs _ (ForeignImportDecl sp name paths) =
-    ForeignImportDecl sp name paths
+applyAttrs attrs (ForeignBlockDecl sp _ lib body) =
+    ForeignBlockDecl sp (reverse attrs) lib body
+applyAttrs attrs (ForeignImportDecl sp _ name paths) =
+    ForeignImportDecl sp (reverse attrs) name paths
+applyAttrs attrs (ImportDecl sp _ alias path) =
+    ImportDecl sp (reverse attrs) alias path
 applyAttrs _ s = s
 
 some1 :: Parser a -> Parser [a]

@@ -53,13 +53,13 @@ data Attribute a = Attribute
 
 data Stmt a
     = ValueDecl a [Attribute a] [Expr a] (Maybe (Expr a)) [Expr a] !Bool
-    | ImportDecl a (Maybe Text) !Text
-    | ForeignImportDecl a !Text [Text]
-    | ForeignBlockDecl a (Maybe (Expr a)) (Stmt a)
+    | ImportDecl a [Attribute a] (Maybe Text) !Text
+    | ForeignImportDecl a [Attribute a] !Text [Text]
+    | ForeignBlockDecl a [Attribute a] (Maybe (Expr a)) (Stmt a)
     | PackageDecl a !Text
     | ExprStmt a (Expr a)
     | AssignStmt a [Expr a] !AssignOp [Expr a]
-    | BlockStmt a (Maybe (Expr a)) [Stmt a]
+    | BlockStmt a (Maybe (Expr a)) [Stmt a] !Bool -- ^ True = do body
     | IfStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Expr a) (Stmt a) (Maybe (Stmt a))
     | WhenStmt a (Expr a) (Stmt a) (Maybe (Stmt a))
     | ForStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Maybe (Expr a)) (Maybe (Stmt a)) (Stmt a)
@@ -71,6 +71,7 @@ data Stmt a
     | DeferStmt a (Stmt a)
     | BranchStmt a !BranchKind (Maybe (Expr a))
     | UsingStmt a [Expr a]
+    | DirectiveStmt a !Text (Stmt a)
     | BadStmt a
     deriving (Show, Functor, Foldable, Traversable)
 
@@ -84,11 +85,11 @@ data Expr a
     | IndexExpr a (Expr a) (Expr a)
     | MatrixIndexExpr a (Expr a) (Expr a) (Expr a)
     | SliceExpr a (Expr a) (Maybe (Expr a)) (Maybe (Expr a))
-    | SelectorExpr a (Expr a) (Expr a)
+    | SelectorExpr a (Expr a) (Expr a) !Bool -- ^ True = arrow call (->)
     | ImplicitSelectorExpr a (Expr a)
     | DerefExpr a (Expr a)
     | CompLit a (Maybe (Expr a)) [Expr a]
-    | ProcLit a (Expr a) (Maybe (Stmt a))
+    | ProcLit a (Maybe Text) (Expr a) [Text] (Maybe (Stmt a))
     | TernaryIfExpr a (Expr a) (Expr a) (Expr a)
     | TernaryWhenExpr a (Expr a) (Expr a) (Expr a)
     | OrElseExpr a (Expr a) (Expr a)
@@ -114,7 +115,7 @@ data Expr a
     | EnumType a (Maybe (Expr a)) [Expr a]
     | BitSetType a (Expr a) (Maybe (Expr a))
     | BitFieldType a (Maybe (Expr a)) [BitFieldField a]
-    | ProcType a (FieldList a) (Maybe (FieldList a)) (Maybe Text)
+    | ProcType a (FieldList a) (Maybe (FieldList a)) !Bool (Maybe Text) [Expr a] -- ^ Bool = diverging (-> !)
     | MatrixType a (Expr a) (Expr a) (Expr a)
     | DistinctType a (Expr a)
     | PolyType a (Expr a) (Maybe (Expr a))
@@ -236,13 +237,13 @@ data FieldFlag
 stmtSpan :: Stmt SrcSpan -> SrcSpan
 stmtSpan = \case
     ValueDecl sp _ _ _ _ _ -> sp
-    ImportDecl sp _ _ -> sp
-    ForeignImportDecl sp _ _ -> sp
-    ForeignBlockDecl sp _ _ -> sp
+    ImportDecl sp _ _ _ -> sp
+    ForeignImportDecl sp _ _ _ -> sp
+    ForeignBlockDecl sp _ _ _ -> sp
     PackageDecl sp _ -> sp
     ExprStmt sp _ -> sp
     AssignStmt sp _ _ _ -> sp
-    BlockStmt sp _ _ -> sp
+    BlockStmt sp _ _ _ -> sp
     IfStmt sp _ _ _ _ _ -> sp
     WhenStmt sp _ _ _ -> sp
     ForStmt sp _ _ _ _ _ -> sp
@@ -254,6 +255,7 @@ stmtSpan = \case
     DeferStmt sp _ -> sp
     BranchStmt sp _ _ -> sp
     UsingStmt sp _ -> sp
+    DirectiveStmt sp _ _ -> sp
     BadStmt sp -> sp
 
 exprSpan :: Expr SrcSpan -> SrcSpan
@@ -267,11 +269,11 @@ exprSpan = \case
     IndexExpr sp _ _ -> sp
     MatrixIndexExpr sp _ _ _ -> sp
     SliceExpr sp _ _ _ -> sp
-    SelectorExpr sp _ _ -> sp
+    SelectorExpr sp _ _ _ -> sp
     ImplicitSelectorExpr sp _ -> sp
     DerefExpr sp _ -> sp
     CompLit sp _ _ -> sp
-    ProcLit sp _ _ -> sp
+    ProcLit sp _ _ _ _ -> sp
     TernaryIfExpr sp _ _ _ -> sp
     TernaryWhenExpr sp _ _ _ -> sp
     OrElseExpr sp _ _ -> sp
@@ -297,7 +299,7 @@ exprSpan = \case
     EnumType sp _ _ -> sp
     BitSetType sp _ _ -> sp
     BitFieldType sp _ _ -> sp
-    ProcType sp _ _ _ -> sp
+    ProcType sp _ _ _ _ _ -> sp
     MatrixType sp _ _ _ -> sp
     DistinctType sp _ -> sp
     PolyType sp _ _ -> sp

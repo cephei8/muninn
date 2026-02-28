@@ -1,6 +1,7 @@
 module Muninn.Formatter.Stmt (
     fmtStmt,
     fmtExpr,
+    stmtLeadingStart,
 ) where
 
 import Muninn.Formatter.Expr (fmtExprWith)
@@ -17,7 +18,8 @@ fmtStmt = \case
     PackageDecl _sp name -> do
         emit "package "
         emit name
-    ImportDecl _sp mAlias path -> do
+    ImportDecl _sp attrs mAlias path -> do
+        mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         emit "import "
         case mAlias of
             Just alias -> do
@@ -27,7 +29,8 @@ fmtStmt = \case
         emit "\""
         emit path
         emit "\""
-    ForeignImportDecl _sp name paths -> do
+    ForeignImportDecl _sp attrs name paths -> do
+        mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         emit "foreign import "
         emit name
         case paths of
@@ -38,7 +41,8 @@ fmtStmt = \case
                 emit "\""
             [] -> do space; emit "\"\""
             _ -> bracesBlock (mapM_ (\p -> newline >> emit "\"" >> emit p >> emit "\",") paths)
-    ForeignBlockDecl _sp mLib body -> do
+    ForeignBlockDecl _sp attrs mLib body -> do
+        mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         emit "foreign"
         case mLib of
             Just lib -> do
@@ -48,7 +52,7 @@ fmtStmt = \case
         space
         fmtBlockBody body
     ValueDecl _sp attrs names mTy vals isMut -> do
-        mapM_ (\a -> fmtAttribute a >> space) (reverse attrs)
+        mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         commaSep (map fmtExpr names)
         case (mTy, vals, isMut) of
             (Nothing, _ : _, False) -> do
@@ -78,7 +82,7 @@ fmtStmt = \case
         emit (showAssignOp op)
         space
         commaSep (map fmtExpr rhs)
-    BlockStmt _sp mLabel stmts -> case mLabel of
+    BlockStmt _sp mLabel stmts _isDo -> case mLabel of
         Just label -> do
             fmtExpr label
             emit ": "
@@ -88,9 +92,11 @@ fmtStmt = \case
             emit "}"
         Nothing -> case stmts of
             [] -> pure ()
-            (s : ss) -> do
-                fmtStmt s
-                mapM_ (\s' -> newline >> fmtStmt s') ss
+            _ -> do
+                emit "{"
+                withIndent $ fmtStmtList stmts
+                newline
+                emit "}"
     IfStmt _sp mLabel mInit cond body mElse -> do
         case mLabel of
             Just label -> do fmtExpr label; emit ": "
@@ -167,7 +173,7 @@ fmtStmt = \case
                 fmtExpr tag
                 space
             Nothing -> pure ()
-        fmtBlockBody body
+        fmtSwitchBody body
     TypeSwitchStmt _sp mLabel mInit mTag body partial -> do
         case mLabel of
             Just label -> do fmtExpr label; emit ": "
@@ -184,10 +190,11 @@ fmtStmt = \case
         case mTag of
             Just tag -> fmtExpr tag >> space
             Nothing -> pure ()
-        fmtBlockBody body
+        fmtSwitchBody body
     CaseClause _sp exprs stmts -> do
-        emit "case "
-        commaSep (map fmtExpr exprs)
+        if null exprs
+            then emit "case"
+            else do emit "case "; commaSep (map fmtExpr exprs)
         emit ":"
         withIndent $ fmtStmtList stmts
     ReturnStmt _sp vals -> do
@@ -210,6 +217,11 @@ fmtStmt = \case
     UsingStmt _sp exprs -> do
         emit "using "
         commaSep (map fmtExpr exprs)
+    DirectiveStmt _sp name inner -> do
+        emit "#"
+        emit name
+        space
+        fmtBlockBody inner
     BadStmt _sp -> emit "/* BAD STMT */"
 
 fmtStmtList :: [Stmt SrcSpan] -> Printer ()
@@ -217,16 +229,17 @@ fmtStmtList stmts = do
     setLastLine 0
     mapM_ fmtOne (filter (not . isEmptyBlock) stmts)
   where
-    isEmptyBlock (BlockStmt _ Nothing []) = True
+    isEmptyBlock (BlockStmt _ Nothing [] _) = True
     isEmptyBlock _ = False
     fmtOne s = do
-        let off = posOffset (spanStart (stmtSpan s))
-            ln = posLine (spanStart (stmtSpan s))
+        let sp = stmtLeadingStart s
+            off = posOffset sp
+            ln = posLine sp
         drainCommentsBefore off
         emitBlankLineSep ln
         newline
         fmtStmt s
-        drainLineCommentAfter (posLine (spanEnd (stmtSpan s)))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan s))) maxBound
         setLastLine (posLine (spanEnd (stmtSpan s)))
 
 fmtTypeSwitchInit :: Stmt SrcSpan -> Printer ()
@@ -237,16 +250,46 @@ fmtTypeSwitchInit (AssignStmt _sp [v] InAssign [e]) = do
 fmtTypeSwitchInit s = fmtStmt s
 
 fmtBlockBody :: Stmt SrcSpan -> Printer ()
-fmtBlockBody (BlockStmt _sp _label stmts) = do
+fmtBlockBody (BlockStmt _sp _label [s] True) = do
+    emit "do "
+    fmtStmt s
+fmtBlockBody (BlockStmt _sp _label stmts _isDo) = do
     emit "{"
     withIndent $ fmtStmtList stmts
     newline
     emit "}"
 fmtBlockBody s = fmtStmt s
 
+fmtSwitchBody :: Stmt SrcSpan -> Printer ()
+fmtSwitchBody (BlockStmt _sp _label stmts _isDo) = do
+    emit "{"
+    fmtStmtList stmts
+    newline
+    emit "}"
+fmtSwitchBody s = fmtStmt s
+
 fmtAttribute :: Attribute SrcSpan -> Printer ()
-fmtAttribute (Attribute _sp exprs) = do
+fmtAttribute (Attribute sp exprs) = do
     emit "@"
     case exprs of
+        [e] | isBareAttr sp -> fmtExpr e
         [e] -> parens (fmtExpr e)
         _ -> parens (commaSep (map fmtExpr exprs))
+  where
+    isBareAttr (SrcSpan _ (SrcPos 0 0 0)) = True
+    isBareAttr _ = False
+
+-- | Returns the source position of the first token printed for this statement.
+-- For declarations with leading attributes the formatter prints attributes
+-- before the name, but 'stmtSpan' only covers the name.  We therefore use the
+-- first attribute's position when one is present, so that blank-line detection
+-- and comment draining use the correct anchor point.
+stmtLeadingStart :: Stmt SrcSpan -> SrcPos
+stmtLeadingStart s = case s of
+    ValueDecl _ attrs _ _ _ _ | not (null attrs) -> attrStart (last attrs)
+    ImportDecl _ attrs _ _ | not (null attrs) -> attrStart (last attrs)
+    ForeignImportDecl _ attrs _ _ | not (null attrs) -> attrStart (last attrs)
+    ForeignBlockDecl _ attrs _ _ | not (null attrs) -> attrStart (last attrs)
+    _ -> spanStart (stmtSpan s)
+  where
+    attrStart (Attribute sp _) = spanStart sp

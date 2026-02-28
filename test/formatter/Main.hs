@@ -6,7 +6,7 @@ import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString.Lazy.Char8 qualified as BL
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isSuffixOf)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Vector qualified as V
@@ -30,7 +30,7 @@ main :: IO ()
 main = do
     odinRoot <- requireEnv "ODIN_SRC_TESTDATA"
     olsRoot <- requireEnv "OLS_SRC_TESTDATA"
-    stdlibTests <- mkRoundTripTests "stdlib" odinRoot ["core", "vendor", "base"]
+    stdlibTests <- mkRoundTripTests "stdlib" odinRoot ["core", "vendor", "base", "tests"]
     olsTests <- mkRoundTripTests "ols" olsRoot ["src", "tests", "tools", "builtin"]
     exePath <- findExe
     defaultMain $
@@ -62,9 +62,14 @@ findExe = do
         ExitSuccess -> pure (filter (/= '\n') out)
         _ -> pure (cwd </> "dist-newstyle/build/muninn")
 
+isReservedPkgFile :: FilePath -> Bool
+isReservedPkgFile p =
+    ("base" </> "builtin" </> "builtin.odin") `isSuffixOf` p
+        || ("base" </> "intrinsics" </> "intrinsics.odin") `isSuffixOf` p
+
 mkRoundTripTests :: String -> FilePath -> [String] -> IO TestTree
 mkRoundTripTests name srcRoot subdirs = do
-    files <- concat <$> mapM (findOdinFiles . (srcRoot </>)) subdirs
+    files <- filter (not . isReservedPkgFile) . concat <$> mapM (findOdinFiles . (srcRoot </>)) subdirs
     let tests = map (mkRoundTripTest srcRoot) files
     pure $ testGroup name tests
 
@@ -99,18 +104,18 @@ configTests =
         "Config options"
         [ testGroup
             "Indent style & width"
-            [ testCase "Spaces (default)" $ do
-                let src = "package test\n\nfoo :: proc() {\n    x := 1\n}\n"
+            [ testCase "Tabs (default)" $ do
+                let src = "package test\n\nfoo :: proc() {\n\tx := 1\n}\n"
                 case parseOdin "<test>" src of
                     Left err -> assertFailure err
                     Right ast -> do
                         let out = formatOdinWith defaultFmtConfig (Just src) ast
                         assertBool
-                            "Expected space indentation"
-                            (any (T.isPrefixOf "    ") (T.lines out))
+                            "Expected tab indentation"
+                            (any (T.isPrefixOf "\t") (T.lines out))
                         assertBool
-                            "Expected no tab indentation"
-                            (not $ any (T.isPrefixOf "\t") (T.lines out))
+                            "Expected no space indentation"
+                            (not $ any (T.isPrefixOf "    ") (T.lines out))
             , testCase "Tabs" $ do
                 let cfg = defaultFmtConfig{cfgIndentStyle = Tabs}
                     src = "package test\n\nfoo :: proc() {\n\tx := 1\n}\n"
@@ -483,7 +488,7 @@ configFileTests =
                 Left err -> assertFailure err
                 Right cfg -> do
                     assertEqual "indent_width overridden" 8 (cfgIndentWidth cfg)
-                    assertEqual "indent_style default" Spaces (cfgIndentStyle cfg)
+                    assertEqual "indent_style default" Tabs (cfgIndentStyle cfg)
                     assertEqual "line_width default" 100 (cfgLineWidth cfg)
                     assertEqual "newline_limit default" 2 (cfgNewlineLimit cfg)
         , testCase "Empty / no [fmt] section" $ do
@@ -516,7 +521,7 @@ cliTests exe =
                         ""
                 assertEqual "exit code" ExitSuccess code
                 assertBool "contains indent_style" ("indent_style" `elem` concatMap words (lines out))
-                assertBool "contains spaces default" (any (== "\"spaces\"") (words out))
+                assertBool "contains tabs default" (any (== "\"tabs\"") (words out))
         , testCase "--print-config (with muninn.toml)" $ do
             withSystemTempDirectory "muninn-test" $ \tmpDir -> do
                 writeFile (tmpDir </> "muninn.toml") $
