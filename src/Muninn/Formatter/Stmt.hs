@@ -91,7 +91,10 @@ fmtStmt = \case
             (s : ss) -> do
                 fmtStmt s
                 mapM_ (\s' -> newline >> fmtStmt s') ss
-    IfStmt _sp mInit cond body mElse -> do
+    IfStmt _sp mLabel mInit cond body mElse -> do
+        case mLabel of
+            Just label -> do fmtExpr label; emit ": "
+            Nothing -> pure ()
         emit "if "
         case mInit of
             Just ini -> do
@@ -116,7 +119,10 @@ fmtStmt = \case
                 emit " else "
                 fmtBlockBody els
             Nothing -> pure ()
-    ForStmt _sp mInit mCond mPost body -> do
+    ForStmt _sp mLabel mInit mCond mPost body -> do
+        case mLabel of
+            Just label -> do fmtExpr label; emit ": "
+            Nothing -> pure ()
         emit "for "
         case (mInit, mCond, mPost) of
             (Nothing, Nothing, Nothing) -> pure ()
@@ -131,7 +137,10 @@ fmtStmt = \case
                 maybe (pure ()) fmtStmt mPost
                 space
         fmtBlockBody body
-    RangeStmt _sp vals range body rev -> do
+    RangeStmt _sp mLabel vals range body rev -> do
+        case mLabel of
+            Just label -> do fmtExpr label; emit ": "
+            Nothing -> pure ()
         if rev then emit "#reverse " else pure ()
         emit "for "
         case vals of
@@ -142,7 +151,10 @@ fmtStmt = \case
         fmtExpr range
         space
         fmtBlockBody body
-    SwitchStmt _sp mInit mTag body partial -> do
+    SwitchStmt _sp mLabel mInit mTag body partial -> do
+        case mLabel of
+            Just label -> do fmtExpr label; emit ": "
+            Nothing -> pure ()
         if partial then emit "#partial " else pure ()
         emit "switch "
         case mInit of
@@ -156,7 +168,10 @@ fmtStmt = \case
                 space
             Nothing -> pure ()
         fmtBlockBody body
-    TypeSwitchStmt _sp mInit mTag body partial -> do
+    TypeSwitchStmt _sp mLabel mInit mTag body partial -> do
+        case mLabel of
+            Just label -> do fmtExpr label; emit ": "
+            Nothing -> pure ()
         if partial then emit "#partial " else pure ()
         emit "switch "
         case mInit of

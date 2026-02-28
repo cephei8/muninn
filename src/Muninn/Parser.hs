@@ -236,7 +236,7 @@ pDirectiveBlock = do
         "reverse" -> do
             body <- pForStmt
             case body of
-                RangeStmt sp vals range bdy _ -> pure $ RangeStmt sp vals range bdy True
+                RangeStmt sp lbl vals range bdy _ -> pure $ RangeStmt sp lbl vals range bdy True
                 _ -> pure body
         "unroll" -> pForStmt
         _ -> fail $ "not a statement directive"
@@ -261,7 +261,12 @@ pLabeledStmt = do
             fail "expected labeled statement"
   where
     applyLabel lbl (BlockStmt sp _ stmts) = BlockStmt sp (Just lbl) stmts
-    applyLabel _ s = s -- for/switch/if don't have label in Odin AST output
+    applyLabel lbl (ForStmt sp _ ini cond post body) = ForStmt sp (Just lbl) ini cond post body
+    applyLabel lbl (RangeStmt sp _ vals range body rev) = RangeStmt sp (Just lbl) vals range body rev
+    applyLabel lbl (SwitchStmt sp _ ini tag body partial) = SwitchStmt sp (Just lbl) ini tag body partial
+    applyLabel lbl (TypeSwitchStmt sp _ ini tag body partial) = TypeSwitchStmt sp (Just lbl) ini tag body partial
+    applyLabel lbl (IfStmt sp _ ini cond body els) = IfStmt sp (Just lbl) ini cond body els
+    applyLabel _ s = s
 
 pExprOrDeclOrAssign :: Parser (Stmt SrcSpan)
 pExprOrDeclOrAssign = do
@@ -392,7 +397,7 @@ pIfStmt = do
             body <- pBlockOrDo
             els <- pOptionalElse
             sp <- spanFrom start
-            pure $ IfStmt sp (Just initStmt) cond body els
+            pure $ IfStmt sp Nothing (Just initStmt) cond body els
         , try $ do
             initStmt <- pAssignRest exprs
             semi
@@ -400,13 +405,13 @@ pIfStmt = do
             body <- pBlockOrDo
             els <- pOptionalElse
             sp <- spanFrom start
-            pure $ IfStmt sp (Just initStmt) cond body els
+            pure $ IfStmt sp Nothing (Just initStmt) cond body els
         , case exprs of
             [cond] -> do
                 body <- pBlockOrDo
                 els <- pOptionalElse
                 sp <- spanFrom start
-                pure $ IfStmt sp Nothing cond body els
+                pure $ IfStmt sp Nothing Nothing cond body els
             _ -> fail "expected single if condition"
         ]
 
@@ -456,20 +461,20 @@ pForStmt = do
         [ do
             body <- pBlock
             sp <- spanFrom start
-            pure $ ForStmt sp Nothing Nothing Nothing body
+            pure $ ForStmt sp Nothing Nothing Nothing Nothing body
         , tryRestore restore $ do
             keyword "in"
             range <- pExprNoCompLit
             body <- pBlockOrDo
             sp <- spanFrom start
-            pure $ RangeStmt sp [] range body False
+            pure $ RangeStmt sp Nothing [] range body False
         , tryRestore restore $ do
             vals <- pForInVar `sepBy1` comma
             keyword "in"
             range <- pExprNoCompLit
             body <- pBlockOrDo
             sp <- spanFrom start
-            pure $ RangeStmt sp vals range body False
+            pure $ RangeStmt sp Nothing vals range body False
         , tryRestore restore $ do
             forSemi
             cond <- optional pExprNoCompLit
@@ -477,7 +482,7 @@ pForStmt = do
             post <- optional pForPost
             body <- pBlockOrDo
             sp <- spanFrom start
-            pure $ ForStmt sp Nothing cond post body
+            pure $ ForStmt sp Nothing Nothing cond post body
         , tryRestore restore $ do
             ini <- pForInit
             forSemi
@@ -486,12 +491,12 @@ pForStmt = do
             post <- optional pForPost
             body <- pBlockOrDo
             sp <- spanFrom start
-            pure $ ForStmt sp (Just ini) cond post body
+            pure $ ForStmt sp Nothing (Just ini) cond post body
         , do
             cond <- pExprNoCompLit
             body <- pBlockOrDo
             sp <- spanFrom start
-            pure $ ForStmt sp Nothing (Just cond) Nothing body
+            pure $ ForStmt sp Nothing Nothing (Just cond) Nothing body
         ]
 
 forSemi :: Parser ()
@@ -537,14 +542,14 @@ pForPost = do
 pSwitchStmt :: Parser (Stmt SrcSpan)
 pSwitchStmt = do
     partial <- pPartialPrefix
-    when partial $ void $ optional $ try (ident *> colon)
+    mLabel <- if partial then pPartialLabel else pure Nothing
     start <- getPos
     keyword "switch"
     choice
         [ try $ do
             body <- pSwitchBody
             sp <- spanFrom start
-            pure $ SwitchStmt sp Nothing Nothing body partial
+            pure $ SwitchStmt sp mLabel Nothing Nothing body partial
         , try $ do
             keyword "in"
             range <- pExprNoCompLit
@@ -553,7 +558,7 @@ pSwitchStmt = do
             let wildcard = Ident (SrcSpan start start) "_"
             let initSp = SrcSpan start (spanEnd (exprSpan range))
             let initStmt = AssignStmt initSp [wildcard] InAssign [range]
-            pure $ TypeSwitchStmt sp (Just initStmt) Nothing body partial
+            pure $ TypeSwitchStmt sp mLabel (Just initStmt) Nothing body partial
         , do
             exprs <- pExprNoCompLit `sepBy1` comma
             choice
@@ -563,29 +568,35 @@ pSwitchStmt = do
                     tag <- optional (try pExprNoCompLit)
                     body <- pSwitchBody
                     sp <- spanFrom start
-                    pure $ SwitchStmt sp (Just initStmt) tag body partial
+                    pure $ SwitchStmt sp mLabel (Just initStmt) tag body partial
                 , try $ do
                     initStmt <- pAssignRest exprs
                     semi
                     tag <- optional (try pExprNoCompLit)
                     body <- pSwitchBody
                     sp <- spanFrom start
-                    pure $ SwitchStmt sp (Just initStmt) tag body partial
+                    pure $ SwitchStmt sp mLabel (Just initStmt) tag body partial
                 , case exprs of
                     [BinaryExpr binSp lhs OpIn rhs] -> do
                         body <- pSwitchBody
                         sp <- spanFrom start
                         let initStmt = AssignStmt binSp [lhs] InAssign [rhs]
-                        pure $ TypeSwitchStmt sp (Just initStmt) Nothing body partial
+                        pure $ TypeSwitchStmt sp mLabel (Just initStmt) Nothing body partial
                     [e] -> do
                         body <- pSwitchBody
                         sp <- spanFrom start
-                        pure $ SwitchStmt sp Nothing (Just e) body partial
+                        pure $ SwitchStmt sp mLabel Nothing (Just e) body partial
                     _ -> fail "expected single switch expression"
                 ]
         ]
   where
     pPartialPrefix = try (True <$ (op "#" *> ident' "partial")) <|> pure False
+    pPartialLabel = optional $ try $ do
+        labelStart <- getPos
+        name <- ident
+        labelEnd <- endPos
+        colon
+        pure $ Ident (SrcSpan labelStart labelEnd) name
     ident' expected = do
         name <- ident
         if name == expected then pure () else fail $ "expected " ++ T.unpack expected
@@ -1405,12 +1416,15 @@ pStructType = do
     start <- getPos
     keyword "struct"
     (flags1, align1) <- pStructDirectives
-    _params <- optional $ try $ do
+    mParams <- optional $ try $ do
         lparen
-        _ps <- pParam `sepBy1` comma
+        paramStart <- getPos
+        ps <- map fixParamTypeid <$> (pParam `sepBy1` comma)
         _ <- optional comma
+        paramEnd <- getPos
         rparen
-        pure ()
+        let ps' = map addUnderscoreName ps
+        pure $ FieldList (SrcSpan paramStart paramEnd) ps'
     (flags2, align2) <- pStructDirectives
     -- Clear pending semi since `where` can be on next line after `)` or directives
     _where <- optional $ try $ do
@@ -1428,7 +1442,7 @@ pStructType = do
     sp <- spanFrom start
     let fl = FieldList (SrcSpan flStart flEnd) fields
     let align = align1 <|> align2
-    pure $ StructType sp fl align (flags1 ++ flags2)
+    pure $ StructType sp mParams fl align (flags1 ++ flags2)
 
 pStructDirectives :: Parser ([StructFlag], Maybe (Expr SrcSpan))
 pStructDirectives = do

@@ -120,6 +120,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("IfStmt")
 		m["pos"] = p
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		m["init"] = nullable_stmt(n.init)
 		m["cond"] = expr_to_json(n.cond)
 		m["body"] = stmt_to_json(n.body)
@@ -143,6 +144,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("ForStmt")
 		m["pos"] = p
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		m["init"] = nullable_stmt(n.init)
 		m["cond"] = nullable_expr(n.cond)
 		m["post"] = nullable_stmt(n.post)
@@ -155,6 +157,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("RangeStmt")
 		m["pos"] = p
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		m["vals"] = exprs_to_json(n.vals)
 		m["range"] = expr_to_json(n.expr)
 		m["body"] = stmt_to_json(n.body)
@@ -167,6 +170,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("SwitchStmt")
 		m["pos"] = p
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		m["init"] = nullable_stmt(n.init)
 		m["tag"] = nullable_expr(n.cond)
 		m["body"] = stmt_to_json(n.body)
@@ -179,6 +183,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("TypeSwitchStmt")
 		m["pos"] = p
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		m["init"] = nullable_stmt(n.tag)
 		m["tag"] = expr_to_json(n.expr)
 		m["body"] = stmt_to_json(n.body)
@@ -258,6 +263,7 @@ stmt_to_json :: proc(s: ^ast.Stmt) -> json.Value {
 		m["node"] = json.String("RangeStmt")
 		m["pos"] = pos_to_json(n.for_pos)
 		m["end"] = end
+		m["label"] = nullable_expr(n.label)
 		vals := make(json.Array, 0, 2)
 		if n.val0 != nil {
 			append(&vals, expr_to_json(n.val0))

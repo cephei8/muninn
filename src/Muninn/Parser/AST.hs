@@ -60,12 +60,12 @@ data Stmt a
     | ExprStmt a (Expr a)
     | AssignStmt a [Expr a] !AssignOp [Expr a]
     | BlockStmt a (Maybe (Expr a)) [Stmt a]
-    | IfStmt a (Maybe (Stmt a)) (Expr a) (Stmt a) (Maybe (Stmt a))
+    | IfStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Expr a) (Stmt a) (Maybe (Stmt a))
     | WhenStmt a (Expr a) (Stmt a) (Maybe (Stmt a))
-    | ForStmt a (Maybe (Stmt a)) (Maybe (Expr a)) (Maybe (Stmt a)) (Stmt a)
-    | RangeStmt a [Expr a] (Expr a) (Stmt a) !Bool
-    | SwitchStmt a (Maybe (Stmt a)) (Maybe (Expr a)) (Stmt a) !Bool
-    | TypeSwitchStmt a (Maybe (Stmt a)) (Maybe (Expr a)) (Stmt a) !Bool
+    | ForStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Maybe (Expr a)) (Maybe (Stmt a)) (Stmt a)
+    | RangeStmt a (Maybe (Expr a)) [Expr a] (Expr a) (Stmt a) !Bool
+    | SwitchStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Maybe (Expr a)) (Stmt a) !Bool
+    | TypeSwitchStmt a (Maybe (Expr a)) (Maybe (Stmt a)) (Maybe (Expr a)) (Stmt a) !Bool
     | CaseClause a [Expr a] [Stmt a]
     | ReturnStmt a [Expr a]
     | DeferStmt a (Stmt a)
@@ -109,7 +109,7 @@ data Expr a
     | ArrayType a (Maybe (Expr a)) (Expr a) (Maybe (Expr a))
     | DynamicArrayType a (Expr a) (Maybe (Expr a))
     | MapType a (Expr a) (Expr a)
-    | StructType a (FieldList a) (Maybe (Expr a)) [StructFlag]
+    | StructType a (Maybe (FieldList a)) (FieldList a) (Maybe (Expr a)) [StructFlag]
     | UnionType a [Expr a] (Maybe (FieldList a)) [UnionFlag]
     | EnumType a (Maybe (Expr a)) [Expr a]
     | BitSetType a (Expr a) (Maybe (Expr a))
@@ -243,12 +243,12 @@ stmtSpan = \case
     ExprStmt sp _ -> sp
     AssignStmt sp _ _ _ -> sp
     BlockStmt sp _ _ -> sp
-    IfStmt sp _ _ _ _ -> sp
+    IfStmt sp _ _ _ _ _ -> sp
     WhenStmt sp _ _ _ -> sp
-    ForStmt sp _ _ _ _ -> sp
-    RangeStmt sp _ _ _ _ -> sp
-    SwitchStmt sp _ _ _ _ -> sp
-    TypeSwitchStmt sp _ _ _ _ -> sp
+    ForStmt sp _ _ _ _ _ -> sp
+    RangeStmt sp _ _ _ _ _ -> sp
+    SwitchStmt sp _ _ _ _ _ -> sp
+    TypeSwitchStmt sp _ _ _ _ _ -> sp
     CaseClause sp _ _ -> sp
     ReturnStmt sp _ -> sp
     DeferStmt sp _ -> sp
@@ -292,7 +292,7 @@ exprSpan = \case
     ArrayType sp _ _ _ -> sp
     DynamicArrayType sp _ _ -> sp
     MapType sp _ _ -> sp
-    StructType sp _ _ _ -> sp
+    StructType sp _ _ _ _ -> sp
     UnionType sp _ _ _ -> sp
     EnumType sp _ _ -> sp
     BitSetType sp _ _ -> sp

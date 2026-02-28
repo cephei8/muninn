@@ -228,9 +228,12 @@ fmtExprWith fmtS = go
             go k
             emit "]"
             go v
-        StructType _sp fields mAlign flags -> do
+        StructType _sp mParams fields mAlign flags -> do
             emit "struct"
             mapM_ (\f -> emit " #" >> emit (showStructFlag f)) flags
+            case mParams of
+                Just params -> parens (fmtFieldListInline params)
+                Nothing -> pure ()
             case mAlign of
                 Just (ParenExpr _ a) -> do
                     emit " #align("

@@ -118,11 +118,12 @@ instance ToJSON (Stmt SrcSpan) where
                 , "label" .= fmap toJSON label
                 , "stmts" .= map toJSON stmts
                 ]
-        IfStmt sp ini cond body els ->
+        IfStmt sp label ini cond body els ->
             object
                 [ "node" .= ("IfStmt" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
+                , "label" .= fmap toJSON label
                 , "init" .= fmap toJSON ini
                 , "cond" .= toJSON cond
                 , "body" .= toJSON body
@@ -137,41 +138,45 @@ instance ToJSON (Stmt SrcSpan) where
                 , "body" .= toJSON body
                 , "else" .= fmap toJSON els
                 ]
-        ForStmt sp ini cond post body ->
+        ForStmt sp label ini cond post body ->
             object
                 [ "node" .= ("ForStmt" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
+                , "label" .= fmap toJSON label
                 , "init" .= fmap toJSON ini
                 , "cond" .= fmap toJSON cond
                 , "post" .= fmap toJSON post
                 , "body" .= toJSON body
                 ]
-        RangeStmt sp vals range body rev ->
+        RangeStmt sp label vals range body rev ->
             object
                 [ "node" .= ("RangeStmt" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
+                , "label" .= fmap toJSON label
                 , "vals" .= map toJSON vals
                 , "range" .= toJSON range
                 , "body" .= toJSON body
                 , "reverse" .= rev
                 ]
-        SwitchStmt sp ini tag body partial ->
+        SwitchStmt sp label ini tag body partial ->
             object
                 [ "node" .= ("SwitchStmt" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
+                , "label" .= fmap toJSON label
                 , "init" .= fmap toJSON ini
                 , "tag" .= fmap toJSON tag
                 , "body" .= toJSON body
                 , "partial" .= partial
                 ]
-        TypeSwitchStmt sp ini tag body partial ->
+        TypeSwitchStmt sp label ini tag body partial ->
             object
                 [ "node" .= ("TypeSwitchStmt" :: Text)
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
+                , "label" .= fmap toJSON label
                 , "init" .= fmap toJSON ini
                 , "tag" .= fmap toJSON tag
                 , "body" .= toJSON body
@@ -491,7 +496,7 @@ instance ToJSON (Expr SrcSpan) where
                 , "key" .= toJSON k
                 , "value" .= toJSON v
                 ]
-        StructType sp fields align flags ->
+        StructType sp _mParams fields align flags ->
             object
                 [ "node" .= ("StructType" :: Text)
                 , "pos" .= spanStart sp
