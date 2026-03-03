@@ -29,18 +29,15 @@ fmtExprWith fmtS = go
         UnaryExpr _sp op mE -> do
             emit (showUnaryOp op)
             maybe (pure ()) go mE
-        BinaryExpr _sp lhs op rhs -> do
-            go lhs
-            case op of
-                OpRangeHalf -> space >> emit "..<" >> space
-                OpRangeFull -> space >> emit "..=" >> space
-                OpIn -> emit " in "
-                OpNotIn -> emit " not_in "
-                _ -> do
-                    space
-                    emit (showBinOp op)
-                    space
-            go rhs
+        BinaryExpr _sp lhs op rhs -> case op of
+            OpRangeHalf -> go lhs >> space >> emit "..<" >> space >> go rhs
+            OpRangeFull -> go lhs >> space >> emit "..=" >> space >> go rhs
+            OpIn -> go lhs >> emit " in " >> go rhs
+            OpNotIn -> go lhs >> emit " not_in " >> go rhs
+            _ ->
+                tryInline
+                    (go lhs >> space >> emit (showBinOp op) >> space >> go rhs)
+                    (fmtBinChain op (BinaryExpr _sp lhs op rhs))
         ParenExpr _sp e -> parens (go e)
         CallExpr sp fn args hasEllipsis -> do
             go fn
@@ -414,23 +411,40 @@ fmtExprWith fmtS = go
         posOffset (spanStart nsp) == posOffset (spanStart (exprSpan ty))
     isSyntheticUnderscore _ _ = False
 
-    fmtField :: Field SrcSpan -> Printer ()
-    fmtField = fmtFieldWith Nothing
+    -- Collect all operands of a left-associative binary chain with the same op.
+    collectBinOps :: BinOp -> Expr SrcSpan -> [Expr SrcSpan]
+    collectBinOps op (BinaryExpr _ lhs op' rhs) | op' == op = collectBinOps op lhs ++ [rhs]
+    collectBinOps _ e = [e]
 
-    fmtFieldWith :: Maybe Int -> Field SrcSpan -> Printer ()
-    fmtFieldWith mAlignW f@(Field _sp names mTy mDef mTag flags) = do
+    -- Multi-line fallback for a binary chain: first operand on the current line,
+    -- remaining operands each on a new indented line preceded by the operator.
+    fmtBinChain :: BinOp -> Expr SrcSpan -> Printer ()
+    fmtBinChain op e = do
+        let operands = collectBinOps op e
+            opStr = showBinOp op
+        case operands of
+            [] -> pure ()
+            (first : rest) -> do
+                go first
+                withIndent $ mapM_ (\e' -> space >> emit opStr >> newline >> go e') rest
+
+    fmtField :: Field SrcSpan -> Printer ()
+    fmtField = fmtFieldWith False Nothing
+
+    fmtFieldWith :: Bool -> Maybe Int -> Field SrcSpan -> Printer ()
+    fmtFieldWith isStruct mAlignW f@(Field _sp names mTy mDef mTag flags) = do
         mapM_ fmtFieldFlag flags
         let unnamed = isSyntheticUnderscore names mTy
         if unnamed then pure () else commaSep (map go names)
         case (null names || unnamed, mTy, mDef) of
             (True, Just ty, _) -> go ty
             (False, Just ty, Just def) -> do
-                emitColon mAlignW f
+                emitColon isStruct mAlignW f
                 go ty
                 emit " = "
                 go def
             (False, Just ty, Nothing) -> do
-                emitColon mAlignW f
+                emitColon isStruct mAlignW f
                 go ty
             (False, Nothing, Just def) -> do
                 emit " := "
@@ -442,9 +456,9 @@ fmtExprWith fmtS = go
                 emit tag
             Nothing -> pure ()
 
-    emitColon :: Maybe Int -> Field SrcSpan -> Printer ()
-    emitColon Nothing _ = emit ": "
-    emitColon (Just target) fld =
+    emitColon :: Bool -> Maybe Int -> Field SrcSpan -> Printer ()
+    emitColon _ Nothing _ = emit ": "
+    emitColon _ (Just target) fld =
         case fieldPrefixWidth fld of
             Nothing -> emit ": "
             Just pw -> do
@@ -473,12 +487,13 @@ fmtExprWith fmtS = go
         FieldByPtr -> 8
         FieldNoBroadcast -> 15
 
-    fieldPrefixWidth :: Field SrcSpan -> Maybe Int
-    fieldPrefixWidth (Field _ names mTy _mDef _mTag flags)
+    -- Raw name/flag width, without colon or trailing space.
+    fieldPrefixBase :: Field SrcSpan -> Maybe Int
+    fieldPrefixBase (Field _ names mTy _mDef _mTag flags)
         | isSyntheticUnderscore names mTy = Nothing
         | null names = Nothing
         | Nothing <- mTy = Nothing
-        | otherwise = Just (flagsW + namesW + sepW + 2)
+        | otherwise = Just (flagsW + namesW + sepW)
       where
         flagsW = sum (map fieldFlagWidth flags)
         namesW = sum (map nameWidth names)
@@ -486,6 +501,11 @@ fmtExprWith fmtS = go
         nameWidth (Ident _ name) = T.length name
         nameWidth _ = 0
 
+    -- Param-style prefix width: includes ": " (colon + space).
+    fieldPrefixWidth :: Field SrcSpan -> Maybe Int
+    fieldPrefixWidth = fmap (+ 2) . fieldPrefixBase
+
+    -- Param-style alignment: types at the same column.
     computeAlignWidth :: [Field SrcSpan] -> Maybe Int
     computeAlignWidth fields =
         let widths = mapMaybe fieldPrefixWidth fields
@@ -501,7 +521,7 @@ fmtExprWith fmtS = go
                 let sp = fieldAnn f
                 drainCommentsBefore (posOffset (spanStart sp))
                 newline
-                fmtFieldWith alignW f
+                fmtFieldWith False alignW f
                 emit ","
                 drainLineCommentAfter (posLine (spanEnd sp)) maxBound
                 setLastLine (posLine (spanEnd sp))
@@ -520,7 +540,7 @@ fmtExprWith fmtS = go
                     let fsp = fieldAnn f
                     drainCommentsBefore (posOffset (spanStart fsp))
                     newline
-                    fmtFieldWith alignW f
+                    fmtFieldWith False alignW f
                     emit ","
                     drainLineCommentAfter (posLine (spanEnd fsp)) nextStart
                     setLastLine (posLine (spanEnd fsp))
@@ -556,7 +576,10 @@ fmtExprWith fmtS = go
 
     fmtResultType :: FieldList SrcSpan -> Printer ()
     fmtResultType (FieldList _sp [Field _fsp [] (Just ty) Nothing Nothing []]) = go ty
-    fmtResultType fl = parens (fmtFieldListInline fl)
+    fmtResultType fl =
+        tryInline
+            (parens (fmtFieldListInline fl))
+            (fmtFieldListMultiLine Nothing fl)
 
     fmtVariants :: [Expr SrcSpan] -> Printer ()
     fmtVariants variants =

@@ -22,6 +22,7 @@ module Muninn.Formatter.Print (
     drainLineCommentAfter,
     hasCommentsBefore,
     skipCommentsBefore,
+    popCommentsBefore,
 ) where
 
 import Control.Monad (when)
@@ -189,6 +190,28 @@ skipCommentsBefore :: Int -> Printer ()
 skipCommentsBefore offset =
     modify' (\s -> s{psComments = dropWhile (\cg -> posOffset (spanStart (cgSpan cg)) < offset) (psComments s)})
 
+-- | Remove and return all comment groups whose start offset is strictly less
+-- than @offset@, without emitting them.
+popCommentsBefore :: Int -> Printer [CommentGroup]
+popCommentsBefore offset = do
+    cgs <- gets psComments
+    let (before, after) = span (\cg -> posOffset (spanStart (cgSpan cg)) < offset) cgs
+    modify' (\s -> s{psComments = after})
+    pure before
+
+emitCommentList :: [Comment] -> Printer ()
+emitCommentList [] = pure ()
+emitCommentList (c : cs) = do
+    emitFirst c
+    mapM_ (uncurry emitNext) (zip (c : cs) cs)
+  where
+    emitFirst (Comment _pos text) = newline >> emit text
+    emitNext (Comment prevPos prevText) (Comment pos text) = do
+        let prevEndLine = posLine prevPos + T.count "\n" prevText
+        when (posLine pos > prevEndLine + 1) $ emit "\n"
+        newline
+        emit text
+
 emitCommentGroupsSep :: [CommentGroup] -> Printer ()
 emitCommentGroupsSep [] = pure ()
 emitCommentGroupsSep [cg] = emitCommentGroup cg
@@ -197,8 +220,10 @@ emitCommentGroupsSep (cg : rest) = do
     mapM_ emitGroupFixedSep rest
   where
     emitGroupFixedSep (CommentGroup cgsp comments) = do
-        emit "\n"
-        mapM_ (\(Comment _pos text) -> newline >> emit text) comments
+        -- Emit 2 blank lines between separate comment groups so that
+        -- re-parsing keeps them in separate groups (≥2 blank lines required).
+        emit "\n\n"
+        emitCommentList comments
         setLastLine (posLine (spanEnd cgsp))
 
 emitCommentGroup :: CommentGroup -> Printer ()
@@ -211,9 +236,5 @@ emitCommentGroup (CommentGroup cgsp comments) = do
         else do
             let cgLine = posLine (spanStart cgsp)
             emitBlankLineSep cgLine
-    mapM_ emitOneComment comments
+    emitCommentList comments
     setLastLine (posLine (spanEnd cgsp))
-  where
-    emitOneComment (Comment _pos text) = do
-        newline
-        emit text

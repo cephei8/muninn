@@ -5,6 +5,7 @@ module Muninn.Formatter (
     formatFileWith,
 ) where
 
+import Control.Monad (when)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
@@ -53,9 +54,30 @@ fmtFile (File _sp pkg decls _comments docs) = do
 emitDocComment :: Maybe CommentGroup -> Printer ()
 emitDocComment Nothing = pure ()
 emitDocComment (Just docCg) = do
+    let docStart = posOffset (spanStart (cgSpan docCg))
+    -- Extract any comment groups that appear before the doc comment in the
+    -- file (e.g. a file-header comment separated from the doc comment by a
+    -- blank line) and emit them first so they are not silently discarded.
+    before <- popCommentsBefore docStart
+    mapM_ emitPreDocGroup before
+    -- Preserve a blank line between the last pre-doc group and the doc comment.
+    lastLn <- getLastLine
+    let docLine = posLine (spanStart (cgSpan docCg))
+    when (lastLn > 0 && docLine > lastLn + 1) $ emit "\n"
+    -- Emit the doc comment itself.
     mapM_ (\(Comment _ text) -> emit text >> emit "\n") (cgList docCg)
     skipCommentsBefore (posOffset (spanEnd (cgSpan docCg)) + 1)
     setLastLine (posLine (spanEnd (cgSpan docCg)))
+  where
+    -- Emit a pre-doc comment group without a leading newline for the very
+    -- first output, but with a blank line separator when groups are
+    -- non-adjacent in the source.
+    emitPreDocGroup (CommentGroup cgsp comments) = do
+        lastLn <- getLastLine
+        let cgLine = posLine (spanStart cgsp)
+        when (lastLn > 0 && cgLine > lastLn + 1) $ emit "\n"
+        mapM_ (\(Comment _ text) -> emit text >> emit "\n") comments
+        setLastLine (posLine (spanEnd cgsp))
 
 fmtDeclList :: [Stmt SrcSpan] -> Printer ()
 fmtDeclList decls = mapM_ fmtOneDecl decls

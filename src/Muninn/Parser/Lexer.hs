@@ -285,8 +285,9 @@ adjustEndLines :: [RawComment] -> Int -> [RawComment]
 adjustEndLines [] _ = []
 adjustEndLines [rc] nextTokLine =
     [rc{rcEndLine = rcEndLine rc + if nextTokLine > rcStartLine rc then 1 else 0}]
-adjustEndLines (rc : rcs) nextTokLine =
-    rc : adjustEndLines rcs nextTokLine
+adjustEndLines (rc : rcs@(next : _)) nextTokLine =
+    rc{rcEndLine = rcEndLine rc + if rcStartLine next > rcStartLine rc then 1 else 0}
+        : adjustEndLines rcs nextTokLine
 
 groupComments ::
     Int ->
