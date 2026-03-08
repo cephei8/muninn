@@ -77,7 +77,7 @@ instance ToJSON (Stmt SrcSpan) where
                 , "pos" .= spanStart sp
                 , "end" .= spanEnd sp
                 , "name" .= name
-                , "paths" .= paths
+                , "paths" .= [p | ForeignStr p <- paths]
                 ]
         ForeignBlockDecl sp _attrs lib body ->
             object

@@ -4,6 +4,7 @@ module Muninn.Formatter.Stmt (
     stmtLeadingStart,
 ) where
 
+import Data.Text qualified as T
 import Muninn.Formatter.Expr (fmtExprWith)
 import Muninn.Formatter.Print
 import Muninn.Parser.AST
@@ -31,16 +32,24 @@ fmtStmt = \case
         emit "\""
     ForeignImportDecl _sp attrs name paths -> do
         mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
-        emit "foreign import "
-        emit name
+        emit "foreign import"
+        if T.null name then pure () else emit " " >> emit name
         case paths of
-            [p] -> do
+            [ForeignStr p] -> do
                 space
                 emit "\""
                 emit p
                 emit "\""
+            [ForeignIdent p] -> do
+                space
+                emit "{"
+                emit p
+                emit "}"
             [] -> do space; emit "\"\""
-            _ -> bracesBlock (mapM_ (\p -> newline >> emit "\"" >> emit p >> emit "\",") paths)
+            _ -> bracesBlock $ mapM_ emitPath paths
+      where
+        emitPath (ForeignStr p) = newline >> emit "\"" >> emit p >> emit "\","
+        emitPath (ForeignIdent p) = newline >> emit p >> emit ","
     ForeignBlockDecl _sp attrs mLib body -> do
         mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         emit "foreign"
@@ -56,23 +65,31 @@ fmtStmt = \case
         commaSep (map fmtExpr names)
         case (mTy, vals, isMut) of
             (Nothing, _ : _, False) -> do
-                emit " :: "
-                commaSep (map fmtExpr vals)
+                -- When the source value is a multi-line parenthesised
+                -- expression (e.g. a long ternary-when chain wrapped in
+                -- parens), put the whole value on a new indented line.
+                -- Other types (struct, proc, …) handle their own layout.
+                let isMultiLineParen = case vals of
+                        [ParenExpr sp _] -> posLine (spanStart sp) < posLine (spanEnd sp)
+                        _ -> False
+                if isMultiLineParen
+                    then emit " ::" >> withIndent (newline >> commaSep (map fmtExpr vals))
+                    else emit " :: " >> commaSep (map fmtExpr vals)
             (Nothing, _ : _, True) -> do
                 emit " := "
                 commaSep (map fmtExpr vals)
             (Just ty, _ : _, False) -> do
-                emit " : "
+                emit ": "
                 fmtExpr ty
                 emit " : "
                 commaSep (map fmtExpr vals)
             (Just ty, _ : _, True) -> do
-                emit " : "
+                emit ": "
                 fmtExpr ty
                 emit " = "
                 commaSep (map fmtExpr vals)
             (Just ty, [], _) -> do
-                emit " : "
+                emit ": "
                 fmtExpr ty
             (Nothing, [], _) -> pure ()
     ExprStmt _sp e -> fmtExpr e
@@ -82,19 +99,27 @@ fmtStmt = \case
         emit (showAssignOp op)
         space
         commaSep (map fmtExpr rhs)
-    BlockStmt _sp mLabel stmts _isDo -> case mLabel of
+    BlockStmt sp mLabel stmts _isDo -> case mLabel of
         Just label -> do
+            let endOff = posOffset (spanEnd sp)
             fmtExpr label
             emit ": "
             emit "{"
-            withIndent $ fmtStmtList stmts
+            drainLineCommentAfter (posLine (spanStart sp)) endOff
+            withIndent $ do
+                fmtStmtList stmts
+                drainCommentsBefore endOff
             newline
             emit "}"
         Nothing -> case stmts of
             [] -> pure ()
             _ -> do
+                let endOff = posOffset (spanEnd sp)
                 emit "{"
-                withIndent $ fmtStmtList stmts
+                drainLineCommentAfter (posLine (spanStart sp)) endOff
+                withIndent $ do
+                    fmtStmtList stmts
+                    drainCommentsBefore endOff
                 newline
                 emit "}"
     IfStmt _sp mLabel mInit cond body mElse -> do
@@ -139,9 +164,9 @@ fmtStmt = \case
                 maybe (pure ()) fmtStmt mInit
                 emit "; "
                 maybe (pure ()) fmtExpr mCond
-                emit "; "
-                maybe (pure ()) fmtStmt mPost
-                space
+                case mPost of
+                    Just post -> emit "; " >> fmtStmt post >> space
+                    Nothing -> emit "; "
         fmtBlockBody body
     RangeStmt _sp mLabel vals range body rev -> do
         case mLabel of
@@ -194,7 +219,15 @@ fmtStmt = \case
     CaseClause _sp exprs stmts -> do
         if null exprs
             then emit "case"
-            else do emit "case "; commaSep (map fmtExpr exprs)
+            else
+                tryInline
+                    (emit "case " >> commaSep (map fmtExpr exprs))
+                    ( case exprs of
+                        [] -> pure ()
+                        (first : rest) ->
+                            emit "case " >> fmtExpr first >>
+                            withIndent (mapM_ (\e -> emit "," >> newline >> fmtExpr e) rest)
+                    )
         emit ":"
         withIndent $ fmtStmtList stmts
     ReturnStmt _sp vals -> do
@@ -239,8 +272,8 @@ fmtStmtList stmts = do
         emitBlankLineSep ln
         newline
         fmtStmt s
-        drainLineCommentAfter (posLine (spanEnd (stmtSpan s))) maxBound
         setLastLine (posLine (spanEnd (stmtSpan s)))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan s))) maxBound
 
 fmtTypeSwitchInit :: Stmt SrcSpan -> Printer ()
 fmtTypeSwitchInit (AssignStmt _sp [v] InAssign [e]) = do
@@ -253,17 +286,36 @@ fmtBlockBody :: Stmt SrcSpan -> Printer ()
 fmtBlockBody (BlockStmt _sp _label [s] True) = do
     emit "do "
     fmtStmt s
-fmtBlockBody (BlockStmt _sp _label stmts _isDo) = do
-    emit "{"
-    withIndent $ fmtStmtList stmts
-    newline
-    emit "}"
+fmtBlockBody (BlockStmt sp _label stmts _isDo) = do
+    let endOff = posOffset (spanEnd sp)
+    if null stmts
+        then do
+            hasComments <- hasCommentsBefore endOff
+            if hasComments
+                then do
+                    emit "{"
+                    drainLineCommentAfter (posLine (spanStart sp)) endOff
+                    withIndent $ drainCommentsBefore endOff
+                    newline
+                    emit "}"
+                else emit "{}"
+        else do
+            emit "{"
+            drainLineCommentAfter (posLine (spanStart sp)) endOff
+            withIndent $ do
+                fmtStmtList stmts
+                drainCommentsBefore endOff
+            newline
+            emit "}"
 fmtBlockBody s = fmtStmt s
 
 fmtSwitchBody :: Stmt SrcSpan -> Printer ()
-fmtSwitchBody (BlockStmt _sp _label stmts _isDo) = do
+fmtSwitchBody (BlockStmt sp _label stmts _isDo) = do
+    let endOff = posOffset (spanEnd sp)
     emit "{"
+    drainLineCommentAfter (posLine (spanStart sp)) endOff
     fmtStmtList stmts
+    drainCommentsBefore endOff
     newline
     emit "}"
 fmtSwitchBody s = fmtStmt s

@@ -90,15 +90,27 @@ fmtDeclList decls = mapM_ fmtOneDecl decls
         emitBlankLineSep ln
         newline
         fmtStmt d
-        drainLineCommentAfter (posLine (spanEnd (stmtSpan d))) maxBound
         setLastLine (posLine (spanEnd (stmtSpan d)))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan d))) maxBound
 
 fmtFileWithPragmas :: FmtConfig -> Text -> File SrcSpan -> Printer ()
-fmtFileWithPragmas _cfg src (File _sp pkg decls comments docs) = do
+fmtFileWithPragmas _cfg src (File sp pkg decls comments docs) = do
     let disabled = findDisabledRanges comments
     emitDocComment docs
-    let pragmas = extractPragmas docs src
+    let pkgOff = posOffset (spanStart sp)
+        pkgLine = posLine (spanStart sp)
+        pragmas = extractPragmas docs src
     mapM_ (\p -> emit p >> emit "\n") pragmas
+    -- Drain comments that appear between pragmas and the package keyword
+    -- (e.g. a file-header comment after a #+build tag).
+    prePackageGroups <- popCommentsBefore pkgOff
+    mapM_ emitPrePkgGroup prePackageGroups
+    -- Preserve blank lines between the last pre-package content and `package`.
+    lastLn <- getLastLine
+    if lastLn > 0
+        then let gap = pkgLine - lastLn - 1
+              in when (gap > 0) $ emit (T.replicate gap "\n")
+        else when (not (null pragmas)) $ emit "\n"
     emit "package "
     emit pkg
     case decls of
@@ -112,6 +124,13 @@ fmtFileWithPragmas _cfg src (File _sp pkg decls comments docs) = do
             fmtDeclListWithPragmas disabled src decls
             drainRemainingComments
             emit "\n"
+  where
+    emitPrePkgGroup (CommentGroup cgsp cms) = do
+        lastLn <- getLastLine
+        let cgLine = posLine (spanStart cgsp)
+        when (lastLn > 0 && cgLine > lastLn + 1) $ emit "\n"
+        mapM_ (\(Comment _ text) -> emit text >> emit "\n") cms
+        setLastLine (posLine (spanEnd cgsp))
 
 fmtDeclListWithPragmas :: [(Int, Int)] -> Text -> [Stmt SrcSpan] -> Printer ()
 fmtDeclListWithPragmas _ _ [] = pure ()
@@ -127,8 +146,8 @@ fmtDeclListWithPragmas disabled src (d : ds) = do
         emitBlankLineSep ln
         newline
         fmtOneDeclWithPragma disabled src decl
-        drainLineCommentAfter (posLine (spanEnd (stmtSpan decl))) maxBound
         setLastLine (posLine (spanEnd (stmtSpan decl)))
+        drainLineCommentAfter (posLine (spanEnd (stmtSpan decl))) maxBound
 
 fmtOneDeclWithPragma :: [(Int, Int)] -> Text -> Stmt SrcSpan -> Printer ()
 fmtOneDeclWithPragma disabled src decl = do
@@ -145,14 +164,17 @@ fmtOneDeclWithPragma disabled src decl = do
 
 extractPragmas :: Maybe CommentGroup -> Text -> [Text]
 extractPragmas mDoc src =
-    let afterDoc = case mDoc of
+    let -- Use line numbers (not byte offsets) to avoid UTF-8 vs Text char count mismatch.
+        afterLine = case mDoc of
             Nothing -> 0
-            Just cg -> posOffset (spanEnd (cgSpan cg))
-        -- Take the source text from after the doc comment to end of file,
-        -- then find lines starting with #+
-        region = T.drop afterDoc src
-        lns = T.lines region
-     in filter (\l -> T.isPrefixOf "#+" (T.stripStart l)) (takeWhile (not . isPkgLine) lns)
+            Just cg -> posLine (spanEnd (cgSpan cg))
+        lns = T.lines src
+        before = takeWhile (not . isPkgLine) (drop afterLine lns)
+        hasPragma = any (\l -> T.isPrefixOf "#+" (T.stripStart l)) before
+     in if not hasPragma
+            then filter (\l -> T.isPrefixOf "#+" (T.stripStart l)) before
+            else reverse . dropWhile (T.null . T.strip) . reverse $
+                    filter (\l -> T.isPrefixOf "#+" (T.stripStart l) || T.null (T.strip l)) before
   where
     isPkgLine l = T.isPrefixOf "package " (T.stripStart l)
 

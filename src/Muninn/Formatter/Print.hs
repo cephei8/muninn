@@ -5,6 +5,8 @@ module Muninn.Formatter.Print (
     newline,
     space,
     withIndent,
+    inCallArgs,
+    withBinChainIndent,
     emitIndent,
     bracesBlock,
     commaSep,
@@ -42,6 +44,7 @@ data PrintEnv = PrintEnv
     { peDepth :: !Int
     , peConfig :: !FmtConfig
     , peForceInline :: !Bool
+    , peInCallArgs :: !Bool
     }
 
 data PrintState = PrintState
@@ -59,7 +62,7 @@ runPrinter :: FmtConfig -> [CommentGroup] -> Printer () -> Text
 runPrinter cfg comments p =
     TL.toStrict $ B.toLazyText $ psBuilder $ execState (runReaderT p env0) st0
   where
-    env0 = PrintEnv{peDepth = 0, peConfig = cfg, peForceInline = False}
+    env0 = PrintEnv{peDepth = 0, peConfig = cfg, peForceInline = False, peInCallArgs = False}
     st0 = PrintState{psBuilder = mempty, psComments = comments, psLastLine = 0, psAfterInlineComment = False, psColumn = 0, psNewlineCount = 0}
 
 emit :: Text -> Printer ()
@@ -86,6 +89,22 @@ space = emit " "
 withIndent :: Printer a -> Printer a
 withIndent = local (\env -> env{peDepth = peDepth env + 1})
 
+-- | Mark that we are formatting direct call arguments.  Binary chains inside
+-- call arguments should not add an extra indentation level on top of the
+-- argument indentation already established by 'withIndent' in the call site.
+inCallArgs :: Printer a -> Printer a
+inCallArgs = local (\env -> env{peInCallArgs = True})
+
+-- | Indent a binary-chain continuation, unless we are directly inside call
+-- arguments, in which case the call's own 'withIndent' already provides the
+-- right indentation level.  Either way, the 'peInCallArgs' flag is cleared so
+-- that nested binary chains (e.g. in conditions) behave normally.
+withBinChainIndent :: Printer a -> Printer a
+withBinChainIndent body = do
+    inArgs <- asks peInCallArgs
+    let cleared = local (\env -> env{peInCallArgs = False}) body
+    if inArgs then cleared else withIndent cleared
+
 getConfig :: Printer FmtConfig
 getConfig = asks peConfig
 
@@ -106,6 +125,7 @@ tryInline inline multiLine = do
             if col > cfgLineWidth cfg || nlCount > psNewlineCount st
                 then put st >> multiLine
                 else pure ()
+
 
 bracesBlock :: Printer () -> Printer ()
 bracesBlock body = do
@@ -157,20 +177,34 @@ drainCommentsBefore offset = do
     modify' (\s -> s{psComments = after})
     emitCommentGroupsSep before
 
--- | Drain a single-line comment group that sits on @srcLine@ and whose start
--- offset is strictly less than @maxOffset@.  The @maxOffset@ bound prevents a
--- comment from being claimed by an earlier item when multiple items share the
--- same source line (e.g. all proc params written on one line).
+-- | Drain comments that sit on @srcLine@ from the head of the comment queue,
+-- whose group start offset is strictly less than @maxOffset@.  When the head
+-- group spans multiple source lines (e.g. an inline comment on @srcLine@
+-- grouped with a standalone comment on @srcLine+1@), only the comments that
+-- actually fall on @srcLine@ are emitted; the remaining comments are kept in
+-- the queue as a new (partial) group.
 drainLineCommentAfter :: Int -> Int -> Printer ()
 drainLineCommentAfter srcLine maxOffset = do
     cgs <- gets psComments
     case cgs of
-        (cg : rest)
-            | posLine (spanStart (cgSpan cg)) == srcLine
-            , posLine (spanEnd (cgSpan cg)) == srcLine
-            , posOffset (spanStart (cgSpan cg)) < maxOffset -> do
-                modify' (\s -> s{psComments = rest, psAfterInlineComment = True})
-                mapM_ (\(Comment _ text) -> emit " " >> emit text) (cgList cg)
+        (CommentGroup cgsp comments : rest)
+            | posLine (spanStart cgsp) == srcLine
+            , posOffset (spanStart cgsp) < maxOffset ->
+                let (onLine, offLine) = span (\c -> posLine (commentPos c) == srcLine) comments
+                 in case onLine of
+                        [] -> pure ()
+                        _ -> do
+                            let (newCgs, afterInline) = case offLine of
+                                    [] -> (rest, True)
+                                    (c : _) ->
+                                        ( CommentGroup (SrcSpan (commentPos c) (spanEnd cgsp)) offLine : rest
+                                        , False
+                                        )
+                            modify' (\s -> s{psComments = newCgs, psAfterInlineComment = afterInline})
+                            mapM_ (\(Comment _ text) -> emit " " >> emit text) onLine
+                            let Comment lastPos lastText = last onLine
+                                commentEndLine = posLine lastPos + T.count "\n" lastText
+                            setLastLine commentEndLine
         _ -> pure ()
 
 drainRemainingComments :: Printer ()
@@ -208,9 +242,12 @@ emitCommentList (c : cs) = do
     emitFirst (Comment _pos text) = newline >> emit text
     emitNext (Comment prevPos prevText) (Comment pos text) = do
         let prevEndLine = posLine prevPos + T.count "\n" prevText
-        when (posLine pos > prevEndLine + 1) $ emit "\n"
-        newline
-        emit text
+        if posLine pos == prevEndLine
+            then emit text -- same source line: no newline between comments
+            else do
+                when (posLine pos > prevEndLine + 1) $ emit "\n"
+                newline
+                emit text
 
 emitCommentGroupsSep :: [CommentGroup] -> Printer ()
 emitCommentGroupsSep [] = pure ()
@@ -229,10 +266,9 @@ emitCommentGroupsSep (cg : rest) = do
 emitCommentGroup :: CommentGroup -> Printer ()
 emitCommentGroup (CommentGroup cgsp comments) = do
     afterInline <- gets psAfterInlineComment
+    modify' (\s -> s{psAfterInlineComment = False})
     if afterInline
-        then do
-            emit "\n\n"
-            modify' (\s -> s{psAfterInlineComment = False})
+        then emit "\n"
         else do
             let cgLine = posLine (spanStart cgsp)
             emitBlankLineSep cgLine

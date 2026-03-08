@@ -152,10 +152,10 @@ pForeignImport = do
         pure (name, paths)
     unnamedImport = do
         path <- pString
-        pure ("", [path])
+        pure ("", [ForeignStr path])
     singlePath = do
         path <- pString
-        pure [path]
+        pure [ForeignStr path]
     multiPath = do
         lbrace
         items <- pathItem `sepBy1` comma
@@ -163,7 +163,7 @@ pForeignImport = do
         rbrace
         pure [p | Just p <- items]
     pathItem = do
-        base <- (Just <$> pString) <|> (Nothing <$ ident)
+        base <- (Just . ForeignStr <$> pString) <|> (Just . ForeignIdent <$> ident)
         hasWhen <- optional $ try $ do
             keyword "when"
             _ <- pExpr

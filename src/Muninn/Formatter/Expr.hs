@@ -42,12 +42,26 @@ fmtExprWith fmtS = go
         CallExpr sp fn args hasEllipsis -> do
             go fn
             let endOff = posOffset (spanEnd sp)
+                fnEndLine = posLine (spanEnd (exprSpan fn))
+                isSourceMultiLine = case args of
+                    (firstArg : _) -> posLine (spanStart (exprSpan firstArg)) /= fnEndLine
+                    [] -> False
+                fmtMultiLine = do
+                    emit "("
+                    withIndent $ inCallArgs $
+                        if hasEllipsis && not (null args)
+                            then mapM_
+                                (\(isEll, e) -> newline >> when isEll (emit "..") >> go e >> emit ",")
+                                (insertEllipsis args)
+                            else mapM_ (\e -> newline >> go e >> emit ",") args
+                    newline
+                    emit ")"
             hasComments <- hasCommentsBefore endOff
             if hasComments
                 then do
                     emit "("
                     setLastLine 0
-                    withIndent $ do
+                    withIndent $ inCallArgs $ do
                         if hasEllipsis && not (null args)
                             then do
                                 let argsList = insertEllipsis args
@@ -60,8 +74,8 @@ fmtExprWith fmtS = go
                                         when isEll (emit "..")
                                         go e
                                         emit ","
-                                        drainLineCommentAfter (posLine (spanEnd esp)) nextStart
                                         setLastLine (posLine (spanEnd esp))
+                                        drainLineCommentAfter (posLine (spanEnd esp)) nextStart
                                     )
                                     (zip argsList nextStarts)
                             else do
@@ -73,30 +87,22 @@ fmtExprWith fmtS = go
                                         newline
                                         go e
                                         emit ","
-                                        drainLineCommentAfter (posLine (spanEnd esp)) nextStart
                                         setLastLine (posLine (spanEnd esp))
+                                        drainLineCommentAfter (posLine (spanEnd esp)) nextStart
                                     )
                                     (zip args nextStarts)
-                    drainCommentsBefore endOff
+                        drainCommentsBefore endOff
                     newline
                     emit ")"
-                else tryInline
-                    ( parens $
-                        if hasEllipsis && not (null args)
-                            then commaSep (map (fmtCallArg go) (insertEllipsis args))
-                            else commaSep (map go args)
-                    )
-                    ( do
-                        emit "("
-                        withIndent $
+                else if isSourceMultiLine
+                    then fmtMultiLine
+                    else tryInline
+                        ( parens $
                             if hasEllipsis && not (null args)
-                                then mapM_
-                                    (\(isEll, e) -> newline >> when isEll (emit "..") >> go e >> emit ",")
-                                    (insertEllipsis args)
-                                else mapM_ (\e -> newline >> go e >> emit ",") args
-                        newline
-                        emit ")"
-                    )
+                                then commaSep (map (fmtCallArg go) (insertEllipsis args))
+                                else commaSep (map go args)
+                        )
+                        fmtMultiLine
         IndexExpr _sp e idx -> do
             go e
             brackets (go idx)
@@ -125,6 +131,7 @@ fmtExprWith fmtS = go
         CompLit sp mTy elems -> do
             maybe (pure ()) go mTy
             let endOff = posOffset (spanEnd sp)
+                alignW = compLitAlignWidth elems
             hasComments <- hasCommentsBefore endOff
             if hasComments
                 then do
@@ -137,13 +144,13 @@ fmtExprWith fmtS = go
                                 let esp = exprSpan e
                                 drainCommentsBefore (posOffset (spanStart esp))
                                 newline
-                                go e
+                                fmtCompLitField alignW e
                                 emit ","
                                 drainLineCommentAfter (posLine (spanEnd esp)) nextStart
                                 setLastLine (posLine (spanEnd esp))
                             )
                             (zip elems nextStarts)
-                    drainCommentsBefore endOff
+                        drainCommentsBefore endOff
                     newline
                     emit "}"
                 else if not (null elems) && all isImplicitSelector elems
@@ -156,9 +163,20 @@ fmtExprWith fmtS = go
                         newline
                         emit "}"
                     else do
-                        emit "{"
-                        commaSep (map go elems)
-                        emit "}"
+                        let isSourceMultiLine = posLine (spanStart sp) /= posLine (spanEnd sp)
+                            fmtMultiLine = do
+                                case mTy of
+                                    Just _ -> emit " {"
+                                    Nothing -> emit "{"
+                                withIndent $ mapM_ (\e -> newline >> fmtCompLitField alignW e >> emit ",") elems
+                                newline
+                                emit "}"
+                        if isSourceMultiLine
+                            then fmtMultiLine
+                            else
+                                tryInline
+                                    (do emit "{"; commaSep (map go elems); emit "}")
+                                    fmtMultiLine
         ProcLit _sp mDir ty tags mBody -> do
             case mDir of
                 Just d -> do emit "#"; emit d; space
@@ -258,7 +276,7 @@ fmtExprWith fmtS = go
             go k
             emit "]"
             go v
-        StructType _sp mParams fields mAlign flags -> do
+        StructType sp mParams fields mAlign flags -> do
             emit "struct"
             mapM_ (\f -> emit " #" >> emit (showStructFlag f)) flags
             case mParams of
@@ -275,9 +293,13 @@ fmtExprWith fmtS = go
                 Nothing -> pure ()
             let FieldList _ flds = fields
             if null flds
-                then emit " {}"
+                then -- Preserve source spacing: `struct{}` (anonymous type) vs `struct {}` (definition).
+                     -- Plain `struct{}` has span length 8; anything with a space or extras is > 8.
+                     if posOffset (spanEnd sp) - posOffset (spanStart sp) > 8
+                         then emit " {}"
+                         else emit "{}"
                 else bracesBlock (fmtFieldListStruct fields)
-        UnionType _sp variants mParams flags -> do
+        UnionType sp variants mParams flags -> do
             emit "union"
             mapM_ (\f -> emit " #" >> emit (showUnionFlag f)) flags
             case mParams of
@@ -285,15 +307,17 @@ fmtExprWith fmtS = go
                 Nothing -> pure ()
             if null variants
                 then emit " {}"
-                else bracesBlock (fmtVariants variants)
-        EnumType _sp mBacking fields -> do
+                else bracesBlock (fmtVariants (posOffset (spanEnd sp)) variants)
+        EnumType sp mBacking fields -> do
             emit "enum"
             case mBacking of
                 Just b -> do
                     space
                     go b
                 Nothing -> pure ()
-            bracesBlock (fmtEnumFields fields)
+            if null fields
+                then emit " {}"
+                else bracesBlock (fmtEnumFields (posOffset (spanEnd sp)) fields)
         BitSetType _sp e mUnderlying -> do
             emit "bit_set["
             go e
@@ -303,14 +327,14 @@ fmtExprWith fmtS = go
                     go u
                 Nothing -> pure ()
             emit "]"
-        BitFieldType _sp mBacking fields -> do
+        BitFieldType sp mBacking fields -> do
             emit "bit_field"
             case mBacking of
                 Just b -> do
                     space
                     go b
                 Nothing -> pure ()
-            bracesBlock (fmtBitFieldFields fields)
+            bracesBlock (fmtBitFieldFields (posOffset (spanEnd sp)) fields)
         ProcType _sp params mResults isDiverging mCC whereExprs -> do
             emit "proc"
             case mCC of
@@ -319,8 +343,9 @@ fmtExprWith fmtS = go
                     emit cc
                     emit "\" "
                 Nothing -> pure ()
-            let FieldList _flsp fields = params
+            let FieldList flsp fields = params
                 alignW = computeAlignWidth fields
+                isSourceMultiLine = posLine (spanStart flsp) /= posLine (spanEnd flsp)
                 fmtResultSuffix = do
                     case (mResults, isDiverging) of
                         (Just results, _) -> do
@@ -333,9 +358,12 @@ fmtExprWith fmtS = go
                         _ -> do
                             emit " where "
                             commaSep (map go whereExprs)
-            tryInline
-                (do parens (fmtFieldListInline params); fmtResultSuffix)
-                (do fmtFieldListMultiLine alignW params; fmtResultSuffix)
+            if isSourceMultiLine
+                then fmtFieldListMultiLine alignW params >> fmtResultSuffix
+                else
+                    tryInline
+                        (do parens (fmtFieldListInline params); fmtResultSuffix)
+                        (do fmtFieldListMultiLine alignW params; fmtResultSuffix)
         MatrixType _sp rows cols elem_ -> do
             emit "matrix["
             go rows
@@ -376,8 +404,16 @@ fmtExprWith fmtS = go
         BadExpr _sp -> emit "/* BAD EXPR */"
 
     fmtBlockBody :: Stmt SrcSpan -> Printer ()
-    fmtBlockBody (BlockStmt _sp _label stmts _isDo) = do
-        bracesBlock (fmtStmtList stmts)
+    fmtBlockBody (BlockStmt sp _label stmts _isDo) = do
+        let endOff = posOffset (spanEnd sp)
+        emit " {"
+        setLastLine 0
+        drainLineCommentAfter (posLine (spanStart sp)) endOff
+        withIndent $ do
+            fmtStmtList stmts
+            drainCommentsBefore endOff
+        newline
+        emit "}"
     fmtBlockBody s = do
         space
         fmtS s
@@ -426,7 +462,7 @@ fmtExprWith fmtS = go
             [] -> pure ()
             (first : rest) -> do
                 go first
-                withIndent $ mapM_ (\e' -> space >> emit opStr >> newline >> go e') rest
+                withBinChainIndent $ mapM_ (\e' -> space >> emit opStr >> newline >> go e') rest
 
     fmtField :: Field SrcSpan -> Printer ()
     fmtField = fmtFieldWith False Nothing
@@ -514,19 +550,21 @@ fmtExprWith fmtS = go
                 else Nothing
 
     fmtFieldListStruct :: FieldList SrcSpan -> Printer ()
-    fmtFieldListStruct (FieldList _sp fields) = do
-        let alignW = computeAlignWidth fields
+    fmtFieldListStruct (FieldList sp fields) = do
+        let endOff = posOffset (spanEnd sp)
+            alignW = computeAlignWidth fields
         mapM_
             ( \f -> do
-                let sp = fieldAnn f
-                drainCommentsBefore (posOffset (spanStart sp))
+                let fsp = fieldAnn f
+                drainCommentsBefore (posOffset (spanStart fsp))
                 newline
                 fmtFieldWith False alignW f
                 emit ","
-                drainLineCommentAfter (posLine (spanEnd sp)) maxBound
-                setLastLine (posLine (spanEnd sp))
+                drainLineCommentAfter (posLine (spanEnd fsp)) maxBound
+                setLastLine (posLine (spanEnd fsp))
             )
             fields
+        drainCommentsBefore endOff
 
     fmtFieldListMultiLine :: Maybe Int -> FieldList SrcSpan -> Printer ()
     fmtFieldListMultiLine alignW (FieldList sp fields) = do
@@ -576,13 +614,16 @@ fmtExprWith fmtS = go
 
     fmtResultType :: FieldList SrcSpan -> Printer ()
     fmtResultType (FieldList _sp [Field _fsp [] (Just ty) Nothing Nothing []]) = go ty
-    fmtResultType fl =
-        tryInline
-            (parens (fmtFieldListInline fl))
-            (fmtFieldListMultiLine Nothing fl)
+    fmtResultType fl@(FieldList sp _) =
+        if posLine (spanStart sp) /= posLine (spanEnd sp)
+            then fmtFieldListMultiLine Nothing fl
+            else
+                tryInline
+                    (parens (fmtFieldListInline fl))
+                    (fmtFieldListMultiLine Nothing fl)
 
-    fmtVariants :: [Expr SrcSpan] -> Printer ()
-    fmtVariants variants =
+    fmtVariants :: Int -> [Expr SrcSpan] -> Printer ()
+    fmtVariants endOff variants = do
         mapM_
             ( \v -> do
                 let sp = exprSpan v
@@ -594,6 +635,7 @@ fmtExprWith fmtS = go
                 setLastLine (posLine (spanEnd sp))
             )
             variants
+        drainCommentsBefore endOff
 
     insertEllipsis :: [Expr SrcSpan] -> [(Bool, Expr SrcSpan)]
     insertEllipsis args =
@@ -619,8 +661,30 @@ fmtExprWith fmtS = go
     fmtCallArg fmt (True, e) = emit ".." >> fmt e
     fmtCallArg fmt (False, e) = fmt e
 
-    fmtEnumFields :: [Expr SrcSpan] -> Printer ()
-    fmtEnumFields fields = do
+    compLitKeyWidth :: Expr SrcSpan -> Int
+    compLitKeyWidth (Ident _ name) = T.length name
+    compLitKeyWidth _ = 0
+
+    compLitAlignWidth :: [Expr SrcSpan] -> Maybe Int
+    compLitAlignWidth elems
+        | all isFieldValue elems, length elems >= 2 =
+            Just (maximum (mapMaybe fvKeyWidth elems))
+        | otherwise = Nothing
+      where
+        fvKeyWidth (FieldValue _ k _) = Just (compLitKeyWidth k)
+        fvKeyWidth _ = Nothing
+
+    fmtCompLitField :: Maybe Int -> Expr SrcSpan -> Printer ()
+    fmtCompLitField (Just target) (FieldValue _sp k v) = do
+        go k
+        let pad = max 1 (target - compLitKeyWidth k + 1)
+        emit (T.replicate pad " ")
+        emit "= "
+        go v
+    fmtCompLitField _ e = go e
+
+    fmtEnumFields :: Int -> [Expr SrcSpan] -> Printer ()
+    fmtEnumFields endOff fields = do
         let alignW = computeEnumAlignWidth fields
         mapM_
             ( \f -> do
@@ -633,6 +697,7 @@ fmtExprWith fmtS = go
                 setLastLine (posLine (spanEnd sp))
             )
             fields
+        drainCommentsBefore endOff
 
     fmtEnumField :: Maybe Int -> Expr SrcSpan -> Printer ()
     fmtEnumField (Just target) (FieldValue _sp k v) = do
@@ -659,8 +724,8 @@ fmtExprWith fmtS = go
         entryWidth (FieldValue _ k _) = enumKeyWidth k
         entryWidth e = enumKeyWidth e
 
-    fmtBitFieldFields :: [BitFieldField SrcSpan] -> Printer ()
-    fmtBitFieldFields fields =
+    fmtBitFieldFields :: Int -> [BitFieldField SrcSpan] -> Printer ()
+    fmtBitFieldFields endOff fields = do
         mapM_
             ( \f -> do
                 let sp = bffAnn f
@@ -672,6 +737,7 @@ fmtExprWith fmtS = go
                 setLastLine (posLine (spanEnd sp))
             )
             fields
+        drainCommentsBefore endOff
 
     fmtBitFieldField :: BitFieldField SrcSpan -> Printer ()
     fmtBitFieldField (BitFieldField _sp name ty size) = do

@@ -6,6 +6,7 @@ module Muninn.Parser.AST (
     FieldList (..),
     BitFieldField (..),
     Attribute (..),
+    ForeignPath (..),
     Comment (..),
     CommentGroup (..),
     BinOp (..),
@@ -51,10 +52,15 @@ data Attribute a = Attribute
     }
     deriving (Show, Functor, Foldable, Traversable)
 
+data ForeignPath
+    = ForeignStr !Text
+    | ForeignIdent !Text
+    deriving (Show, Eq)
+
 data Stmt a
     = ValueDecl a [Attribute a] [Expr a] (Maybe (Expr a)) [Expr a] !Bool
     | ImportDecl a [Attribute a] (Maybe Text) !Text
-    | ForeignImportDecl a [Attribute a] !Text [Text]
+    | ForeignImportDecl a [Attribute a] !Text [ForeignPath]
     | ForeignBlockDecl a [Attribute a] (Maybe (Expr a)) (Stmt a)
     | PackageDecl a !Text
     | ExprStmt a (Expr a)
