@@ -341,7 +341,7 @@ instance ToJSON (Expr SrcSpan) where
                 , "type" .= toJSON ty
                 , "body" .= maybe Null toJSON body
                 ]
-        TernaryIfExpr sp cond then_ else_ ->
+        TernaryIfExpr sp _ cond then_ else_ ->
             object
                 [ "node" .= ("TernaryIfExpr" :: Text)
                 , "pos" .= spanStart sp

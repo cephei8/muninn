@@ -1,7 +1,7 @@
 cabal-version:      3.0
 name:               muninn
 version:            0.0.0.1
-homepage:           https://github.com/cephei8/muninn
+homepage:           https://sr.ht/~cephei8/muninn
 license:            MIT
 license-file:       LICENSE
 author:             cephei8

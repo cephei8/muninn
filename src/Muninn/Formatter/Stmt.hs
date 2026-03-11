@@ -50,6 +50,17 @@ fmtStmt = \case
       where
         emitPath (ForeignStr p) = newline >> emit "\"" >> emit p >> emit "\","
         emitPath (ForeignIdent p) = newline >> emit p >> emit ","
+        emitPath (ForeignCond base cond alt) = do
+            newline
+            emitForeignBase base
+            emit " when "
+            fmtExpr cond
+            emit " else "
+            emitForeignBase alt
+            emit ","
+        emitForeignBase (ForeignStr p) = emit "\"" >> emit p >> emit "\""
+        emitForeignBase (ForeignIdent p) = emit p
+        emitForeignBase fp = bracesBlock $ emitPath fp
     ForeignBlockDecl _sp attrs mLib body -> do
         mapM_ (\a -> fmtAttribute a >> newline) (reverse attrs)
         emit "foreign"

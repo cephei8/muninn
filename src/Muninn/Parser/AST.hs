@@ -55,7 +55,8 @@ data Attribute a = Attribute
 data ForeignPath
     = ForeignStr !Text
     | ForeignIdent !Text
-    deriving (Show, Eq)
+    | ForeignCond !ForeignPath !(Expr SrcSpan) !ForeignPath
+    deriving (Show)
 
 data Stmt a
     = ValueDecl a [Attribute a] [Expr a] (Maybe (Expr a)) [Expr a] !Bool
@@ -96,7 +97,7 @@ data Expr a
     | DerefExpr a (Expr a)
     | CompLit a (Maybe (Expr a)) [Expr a]
     | ProcLit a (Maybe Text) (Expr a) [Text] (Maybe (Stmt a))
-    | TernaryIfExpr a (Expr a) (Expr a) (Expr a)
+    | TernaryIfExpr a !Bool (Expr a) (Expr a) (Expr a) -- ^ True = (? :) form, False = (val if cond else alt) postfix form
     | TernaryWhenExpr a (Expr a) (Expr a) (Expr a)
     | OrElseExpr a (Expr a) (Expr a)
     | OrReturnExpr a (Expr a)
@@ -280,7 +281,7 @@ exprSpan = \case
     DerefExpr sp _ -> sp
     CompLit sp _ _ -> sp
     ProcLit sp _ _ _ _ -> sp
-    TernaryIfExpr sp _ _ _ -> sp
+    TernaryIfExpr sp _ _ _ _ -> sp
     TernaryWhenExpr sp _ _ _ -> sp
     OrElseExpr sp _ _ -> sp
     OrReturnExpr sp _ -> sp

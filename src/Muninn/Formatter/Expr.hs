@@ -200,12 +200,20 @@ fmtExprWith fmtS = go
             emit "}"
         Ellipsis _sp mE -> do
             maybe (emit "...") (\e -> emit ".." >> go e) mE
-        TernaryIfExpr _sp cond then_ else_ -> do
-            go cond
-            emit " ? "
-            go then_
-            emit " : "
-            go else_
+        TernaryIfExpr _sp isQMark cond then_ else_ ->
+            if isQMark
+                then do
+                    go cond
+                    emit " ? "
+                    go then_
+                    emit " : "
+                    go else_
+                else do
+                    go then_
+                    emit " if "
+                    go cond
+                    emit " else "
+                    go else_
         TernaryWhenExpr _sp cond then_ else_ -> do
             go then_
             emit " when "

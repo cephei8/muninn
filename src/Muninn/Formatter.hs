@@ -101,16 +101,23 @@ fmtFileWithPragmas _cfg src (File sp pkg decls comments docs) = do
         pkgLine = posLine (spanStart sp)
         pragmas = extractPragmas docs src
     mapM_ (\p -> emit p >> emit "\n") pragmas
+    -- Track the source line of the last emitted pragma so that gap detection
+    -- in emitPrePkgGroup can preserve blank lines between pragmas and any
+    -- following comments (e.g. a file-header comment after a #+build tag).
+    when (not (null pragmas)) $ do
+        let afterLine = case docs of
+                Nothing -> 0
+                Just cg -> posLine (spanEnd (cgSpan cg))
+        setLastLine (afterLine + length pragmas)
     -- Drain comments that appear between pragmas and the package keyword
     -- (e.g. a file-header comment after a #+build tag).
     prePackageGroups <- popCommentsBefore pkgOff
     mapM_ emitPrePkgGroup prePackageGroups
     -- Preserve blank lines between the last pre-package content and `package`.
     lastLn <- getLastLine
-    if lastLn > 0
-        then let gap = pkgLine - lastLn - 1
-              in when (gap > 0) $ emit (T.replicate gap "\n")
-        else when (not (null pragmas)) $ emit "\n"
+    when (lastLn > 0) $ do
+        let gap = pkgLine - lastLn - 1
+        when (gap > 0) $ emit (T.replicate gap "\n")
     emit "package "
     emit pkg
     case decls of

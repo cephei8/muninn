@@ -163,16 +163,16 @@ pForeignImport = do
         rbrace
         pure [p | Just p <- items]
     pathItem = do
-        base <- (Just . ForeignStr <$> pString) <|> (Just . ForeignIdent <$> ident)
-        hasWhen <- optional $ try $ do
+        base <- (ForeignStr <$> pString) <|> (ForeignIdent <$> ident)
+        mCond <- optional $ try $ do
             keyword "when"
-            _ <- pExpr
+            cond <- pExpr
             keyword "else"
-            _ <- pString <|> ident
-            pure ()
-        case hasWhen of
-            Just _ -> pure Nothing
-            Nothing -> pure base
+            alt <- (ForeignStr <$> pString) <|> (ForeignIdent <$> ident)
+            pure (cond, alt)
+        case mCond of
+            Just (cond, alt) -> pure $ Just (ForeignCond base cond alt)
+            Nothing -> pure $ Just base
 
 pSimpleStmt :: Parser (Stmt SrcSpan)
 pSimpleStmt =
@@ -725,7 +725,7 @@ pExpr' acl = do
                         then_ <- pOrElseExpr' acl
                         colon
                         els <- pExpr' acl
-                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) e then_ els
+                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) True e then_ els
                     , pure e
                     ]
             else
@@ -735,7 +735,7 @@ pExpr' acl = do
                         cond <- pOrElseExpr' False
                         keyword "else"
                         els <- pExpr' acl
-                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) cond e els
+                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) False cond e els
                     , try $ do
                         keyword "when"
                         cond <- pOrElseExpr' False
@@ -747,7 +747,7 @@ pExpr' acl = do
                         then_ <- pOrElseExpr' acl
                         colon
                         els <- pExpr' acl
-                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) e then_ els
+                        pure $ TernaryIfExpr (exprSpan e <-> exprSpan els) True e then_ els
                     , pure e
                     ]
 
