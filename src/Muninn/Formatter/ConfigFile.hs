@@ -64,9 +64,6 @@ parseConfigToml input = applyPairs defaultFmtConfig pairs
     applyPair cfg "indent_width" v = case readInt v of
         Just n -> Right cfg{cfgIndentWidth = n}
         Nothing -> Left $ "invalid indent_width: " ++ T.unpack v
-    applyPair cfg "newline_limit" v = case readInt v of
-        Just n -> Right cfg{cfgNewlineLimit = n}
-        Nothing -> Left $ "invalid newline_limit: " ++ T.unpack v
     applyPair cfg "indent_style" v = case parseStyle v of
         Just s -> Right cfg{cfgIndentStyle = s}
         Nothing -> Left $ "invalid indent_style: " ++ T.unpack v
@@ -94,7 +91,6 @@ showConfig cfg =
         , "indent_style = \"" <> styleText <> "\""
         , "indent_width = " <> T.pack (show (cfgIndentWidth cfg))
         , "line_width = " <> T.pack (show (cfgLineWidth cfg))
-        , "newline_limit = " <> T.pack (show (cfgNewlineLimit cfg))
         ]
   where
     styleText = case cfgIndentStyle cfg of

@@ -10,7 +10,6 @@ data IndentStyle = Tabs | Spaces
 data FmtConfig = FmtConfig
     { cfgLineWidth :: !Int
     , cfgIndentWidth :: !Int
-    , cfgNewlineLimit :: !Int
     , cfgIndentStyle :: !IndentStyle
     }
     deriving (Show, Eq)
@@ -20,6 +19,5 @@ defaultFmtConfig =
     FmtConfig
         { cfgLineWidth = 100
         , cfgIndentWidth = 4
-        , cfgNewlineLimit = 2
         , cfgIndentStyle = Tabs
         }

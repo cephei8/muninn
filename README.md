@@ -24,15 +24,13 @@ The formatter searches for `muninn.toml` starting from the formatted file's dire
 indent_style = "tabs"
 indent_width = 4
 line_width = 100
-newline_limit = 2
 ```
 
 | Key | Default | Description |
 |---|---|---|
 | `indent_style` | `"spaces"` | `"tabs"` or `"spaces"` |
 | `indent_width` | `4` | Number of spaces per indent level (when using spaces) |
-| `line_width` | `100` | Target line width  |
-| `newline_limit` | `2` | Maximum consecutive newlines allowed |
+| `line_width` | `100` | Target line width |
 
 
 ## Disable formatting
@@ -49,4 +47,4 @@ dont_format_this :: proc() {
 
 ## License
 
-This project is licensed under the terms of the [MIT](./LICENSE).
+This project is licensed under the terms of the [MIT License](./LICENSE).

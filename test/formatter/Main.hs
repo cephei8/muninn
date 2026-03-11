@@ -205,9 +205,6 @@ configTests =
                         assertBool
                             "No triple newlines"
                             (not (T.isInfixOf "\n\n\n" out))
-            , testCase "Config newline_limit is stored correctly" $ do
-                let cfg = defaultFmtConfig{cfgNewlineLimit = 5}
-                assertEqual "newline_limit" 5 (cfgNewlineLimit cfg)
             ]
         ]
 
@@ -469,7 +466,6 @@ configFileTests =
                         , "indent_style = \"spaces\""
                         , "indent_width = 2"
                         , "line_width = 80"
-                        , "newline_limit = 3"
                         ]
             case parseConfigToml toml of
                 Left err -> assertFailure err
@@ -477,7 +473,6 @@ configFileTests =
                     assertEqual "indent_style" Spaces (cfgIndentStyle cfg)
                     assertEqual "indent_width" 2 (cfgIndentWidth cfg)
                     assertEqual "line_width" 80 (cfgLineWidth cfg)
-                    assertEqual "newline_limit" 3 (cfgNewlineLimit cfg)
         , testCase "Partial config" $ do
             let toml =
                     T.unlines
@@ -490,7 +485,6 @@ configFileTests =
                     assertEqual "indent_width overridden" 8 (cfgIndentWidth cfg)
                     assertEqual "indent_style default" Tabs (cfgIndentStyle cfg)
                     assertEqual "line_width default" 100 (cfgLineWidth cfg)
-                    assertEqual "newline_limit default" 2 (cfgNewlineLimit cfg)
         , testCase "Empty / no [fmt] section" $ do
             let toml = "# just a comment\n"
             case parseConfigToml toml of
